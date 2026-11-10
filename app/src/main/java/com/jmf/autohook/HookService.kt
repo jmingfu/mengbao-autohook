@@ -1664,7 +1664,7 @@ private fun coord(name: String, def: FloatArray): FloatArray {
         val gx0 = (bmp.width * 0.20f).toInt()
         val gy0 = (bmp.height * 0.25f).toInt()
         val gx1 = (bmp.width * 0.85f).toInt()
-        val gy1 = (bmp.height * 0.90f).toInt()
+        val gy1 = (bmp.height * 0.95f).toInt()
         val cw = gx1 - gx0
         val ch = gy1 - gy0
         if (cw <= 40 || ch <= 40) return null
@@ -1690,7 +1690,9 @@ private fun coord(name: String, def: FloatArray): FloatArray {
         var bestScore = 0f
         var bestCx = -1
         var bestCy = -1
-        for (mul in floatArrayOf(0.9f, 1f, 1.1f)) {
+        var bestW = 0
+        // 不同分辨率下游戏 UI 缩放不一致（720 的按钮明显比按宽度比例大），尺度范围放宽
+        for (mul in floatArrayOf(0.8f, 0.9f, 1f, 1.1f, 1.2f, 1.3f, 1.4f, 1.5f, 1.6f, 1.7f)) {
             val s = base * mul
             val tw = (tpl.first * s).toInt().coerceAtLeast(8)
             val th = (tpl.second * s).toInt().coerceAtLeast(8)
@@ -1738,10 +1740,11 @@ private fun coord(name: String, def: FloatArray): FloatArray {
                             (maskCount * sumII - sumI * sumI) * (maskCount * sumTT - sumT * sumT)
                         )
                         val score = if (den > 1e-3f) ((maskCount * sumIT - sumI * sumT) / den) else 0f
-                        if (score > bestScore) {
+                        if (score > bestScore && score <= 1.0f) {
                             bestScore = score
                             bestCx = x + tw / 2
                             bestCy = y + th / 2
+                            bestW = (tw / f).toInt().coerceAtLeast(24)
                         }
                     }
                     x += 2
@@ -1752,16 +1755,14 @@ private fun coord(name: String, def: FloatArray): FloatArray {
         if (bestScore < 0.65f || bestCx < 0) return null
         val cx = gx0 + (bestCx / f).toInt()
         val cy = gy0 + (bestCy / f).toInt()
-        val center = refineCancelCenter(bmp, cx, cy, tpl.first, tpl.second) ?: return null
+        val nativeH = (bestW * tpl.second / tpl.first).coerceAtLeast(12)
+        val center = refineCancelCenter(bmp, cx, cy, bestW, nativeH) ?: return null
         logLine("取消按钮匹配 score=" + java.lang.String.format("%.3f", bestScore) + " ($cx,$cy) -> 按钮中心(${center.first},${center.second})")
         return center
     }
 
     /** 以匹配点为起点，在附近找橙色按钮块，返回块中心（避免匹配偏到按钮边缘） */
-    private fun refineCancelCenter(bmp: Bitmap, cx: Int, cy: Int, tplW: Int, tplH: Int): Pair<Int, Int>? {
-        val scale = bmp.width / 2400f
-        val nativeW = (tplW * scale).toInt().coerceAtLeast(24)
-        val nativeH = (tplH * scale).toInt().coerceAtLeast(12)
+    private fun refineCancelCenter(bmp: Bitmap, cx: Int, cy: Int, nativeW: Int, nativeH: Int): Pair<Int, Int>? {
         val x0 = (cx - nativeW).coerceAtLeast(0)
         val x1 = (cx + nativeW).coerceAtMost(bmp.width - 1)
         val y0 = (cy - nativeH).coerceAtLeast(0)
