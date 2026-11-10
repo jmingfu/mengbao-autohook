@@ -479,11 +479,14 @@ private fun coord(name: String, def: FloatArray): FloatArray {
                     }
                 }
             }
-            val iconLp = overlayLp((40 * resources.displayMetrics.density).toInt(),
-                (40 * resources.displayMetrics.density).toInt(),
+            val dm = resources.displayMetrics
+            val iconSize = (40 * dm.density).toInt()
+            // 日志窗占底部 24%，图标放到日志上方，避免横屏时重叠
+            val logH = (dm.heightPixels * 0.24f).toInt()
+            val iconLp = overlayLp(iconSize, iconSize,
                 android.view.Gravity.BOTTOM or android.view.Gravity.START).also {
-                it.x = (8 * resources.displayMetrics.density).toInt()
-                it.y = (60 * resources.displayMetrics.density).toInt()
+                it.x = (8 * dm.density).toInt()
+                it.y = logH + (10 * dm.density).toInt()
             }
             var downRawX = 0f
             var downRawY = 0f
@@ -992,6 +995,37 @@ private fun coord(name: String, def: FloatArray): FloatArray {
         }
     }
 
+    /** 改良校验失败后快速关掉误触弹出的一个弹窗，避免后续重试全被挡住 */
+    private suspend fun quickClosePopup(): Boolean {
+        val bmp = capture() ?: return false
+        try {
+            val cancel = findCancelButton(bmp)
+            if (cancel != null) {
+                val (rx, ry) = capToReal(cancel.first, cancel.second)
+                val longSide = maxOf(inputW, inputH).toFloat().coerceAtLeast(1f)
+                val shortSide = minOf(inputW, inputH).toFloat().coerceAtLeast(1f)
+                logLine("检测到误触弹窗（取消），点击 ($rx,$ry)")
+                tap(floatArrayOf(rx / longSide, ry / shortSide))
+                delay(1500)
+                return true
+            }
+            val xs = findGreenXs(bmp)
+            if (xs.isNotEmpty()) {
+                val (x, y) = xs.first()
+                val (rx, ry) = capToReal(x, y)
+                val longSide = maxOf(inputW, inputH).toFloat().coerceAtLeast(1f)
+                val shortSide = minOf(inputW, inputH).toFloat().coerceAtLeast(1f)
+                logLine("检测到误触弹窗（绿叉），点击 ($rx,$ry)")
+                tap(floatArrayOf(rx / longSide, ry / shortSide))
+                delay(1500)
+                return true
+            }
+            return false
+        } finally {
+            bmp.recycle()
+        }
+    }
+
     /** 打开改良页：多轮监测，优先等进入战斗后用左上角箭头入口，直到打开成功 */
     private suspend fun openImprovePage(): Boolean {
         var combatFails = 0
@@ -1007,13 +1041,17 @@ private fun coord(name: String, def: FloatArray): FloatArray {
                 }
                 combatFails++
                 logLine("改良第 $round 轮未打开，继续等下一场战斗")
+                if (quickClosePopup()) {
+                    logLine("已清理误触弹窗，继续")
+                    continue
+                }
                 // 清弹窗比较慢，别每次都跑，避免吃掉下一场战斗的时间
                 if (combatFails % 3 == 0) closeAllGreenX()
                 continue
             }
             if (isImproveOpen()) return true
-            // 战斗间隔不长，缩短轮询避免错过开场
-            delay(1000)
+            // 战斗间隔不长，高频轮询避免错过开场（日常一天只跑一次）
+            delay(300)
         }
         logLine("改良页多轮尝试仍未打开")
         return false
@@ -1813,6 +1851,10 @@ private fun coord(name: String, def: FloatArray): FloatArray {
             val bw = (maxX - minX + 1) * step
             val bh = (maxY - minY + 1) * step
             if (bw < nativeW * 0.6f || bw > nativeW * 1.6f || bh < nativeH * 0.5f || bh > nativeH * 2.0f) continue
+            // 按按钮的长宽比再过一遍，避免命中方形图标
+            val aspect = bw.toFloat() / bh.coerceAtLeast(1)
+            val tplAspect = nativeW.toFloat() / nativeH.coerceAtLeast(1)
+            if (aspect < tplAspect * 0.7f || aspect > tplAspect * 1.4f) continue
             val bx = x0 + (minX + maxX) / 2 * step
             val by = y0 + (minY + maxY) / 2 * step
             val dist = kotlin.math.hypot((bx - cx).toDouble(), (by - cy).toDouble())
