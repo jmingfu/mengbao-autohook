@@ -422,6 +422,7 @@ private fun coord(name: String, def: FloatArray): FloatArray {
             .getDisplay(android.view.Display.DEFAULT_DISPLAY).getRealSize(realSize)
         inputW = realSize.x
         inputH = realSize.y
+        currentGameRect = Rect(0, 0, screenW, screenH)
         logLine("input=" + inputW + "x" + inputH)
         imageReader = ImageReader.newInstance(screenW, screenH, PixelFormat.RGBA_8888, 2)
         virtualDisplay = projection!!.createVirtualDisplay(
@@ -658,6 +659,39 @@ private fun coord(name: String, def: FloatArray): FloatArray {
                 }
             }
             mapRow.addView(btnLog)
+            val buyRow = android.widget.LinearLayout(this).apply {
+                orientation = android.widget.LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+            }
+            buyRow.addView(android.widget.TextView(this).apply {
+                text = "买药间隔"
+                textSize = 12f
+                setTextColor(0xFFFFFFFFL.toInt())
+            }, android.widget.LinearLayout.LayoutParams(0,
+                android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            val buyEt = android.widget.EditText(this).apply {
+                setText(prefs.getInt("intervalBuy", 60).toString())
+                textSize = 12f
+                inputType = android.text.InputType.TYPE_CLASS_NUMBER
+                setTextColor(0xFFFFFFFFL.toInt())
+                layoutParams = android.widget.LinearLayout.LayoutParams((64 * d).toInt(),
+                    android.view.ViewGroup.LayoutParams.WRAP_CONTENT)
+                addTextChangedListener(object : android.text.TextWatcher {
+                    override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+                    override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+                    override fun afterTextChanged(s: android.text.Editable?) {
+                        val v = s?.toString()?.toIntOrNull()
+                        if (v != null && v > 0) prefs.edit().putInt("intervalBuy", v).apply()
+                    }
+                })
+            }
+            buyRow.addView(buyEt)
+            buyRow.addView(android.widget.TextView(this).apply {
+                text = "分"
+                textSize = 11f
+                setTextColor(0xFFCCCCCCL.toInt())
+            })
+            root.addView(buyRow)
             root.addView(mapRow)
 
             val scroll = android.widget.ScrollView(this)
@@ -1126,17 +1160,29 @@ private fun coord(name: String, def: FloatArray): FloatArray {
         val numOk = coordOrNull("buyNumConfirm")
         if (avatar == null || bag == null || shop == null || sellAll == null || sellOk == null ||
             buy == null || numBox == null || numOk == null) {
-            logLine("买药跳过：坐标未校准")
-            prefs.edit().putLong("lastBuyAt", System.currentTimeMillis()).apply()
+            val missing = buildList {
+                if (avatar == null) add("avatar")
+                if (bag == null) add("bag")
+                if (shop == null) add("shopBtn")
+                if (sellAll == null) add("sellAllBtn")
+                if (sellOk == null) add("sellConfirm")
+                if (buy == null) add("buyBtn")
+                if (numBox == null) add("buyNumBox")
+                if (numOk == null) add("buyNumConfirm")
+            }.joinToString(",")
+            logLine("买药跳过：坐标未校准（$missing），本轮不更新计时")
             return
         }
         setStatus("买药：开始")
         closeAllGreenX()
         tap(avatar); delay(3000)
         tap(bag); delay(3000)
+        logLine("买药：包裹已打开")
         tap(shop); delay(3000)
+        logLine("买药：商店已打开")
         tap(sellAll); delay(3000)
         tap(sellOk); delay(3000)
+        logLine("买药：一键出售完成")
         var done = 0
         for (i in listOf(1, 3)) {
             val med = coordOrNull("med$i") ?: continue
@@ -1162,6 +1208,7 @@ private fun coord(name: String, def: FloatArray): FloatArray {
             if (!pressImeDone()) logLine("第 $i 种药：未找到输入法完成键")
             delay(5000)
             tap(numOk); delay(3000)
+            logLine("第 $i 种药：数量 500 已确认")
             done++
         }
         coordOrNull("shopClose")?.let { logLine("买药：关闭商店"); tap(it); delay(3000) }
@@ -1346,9 +1393,16 @@ private fun coord(name: String, def: FloatArray): FloatArray {
             // 固定启动流程：先归位，再买药/清背包，整段跑完才开始按间隔计时
             try {
                 delay(3000)
-                if (running && System.currentTimeMillis() - prefs.getLong("lastBuyAt", 0L) >= 60 * 60 * 1000L) {
-                    logLine("启动流程：先买药")
-                    runBuyFlow(prefs)
+                if (running) {
+                    val buyGap = prefs.getInt("intervalBuy", 60).coerceAtLeast(1) * 60_000L
+                    val lastBuy = prefs.getLong("lastBuyAt", 0L)
+                    if (System.currentTimeMillis() - lastBuy >= buyGap) {
+                        logLine("启动流程：先买药")
+                        runBuyFlow(prefs)
+                    } else {
+                        val leftMin = (buyGap - (System.currentTimeMillis() - lastBuy)) / 60_000L + 1
+                        logLine("启动流程：买药未到期，剩余 $leftMin 分钟")
+                    }
                 }
                 if (running) {
                     closeAllGreenX()
@@ -1381,8 +1435,13 @@ private fun coord(name: String, def: FloatArray): FloatArray {
             }
             while (running) {
                 try {
-                    if (System.currentTimeMillis() - prefs.getLong("lastBuyAt", 0L) >= 60 * 60 * 1000L) {
+                    val buyGap = prefs.getInt("intervalBuy", 60).coerceAtLeast(1) * 60_000L
+                    val lastBuy = prefs.getLong("lastBuyAt", 0L)
+                    if (System.currentTimeMillis() - lastBuy >= buyGap) {
                         runBuyFlow(prefs)
+                    } else {
+                        val leftMin = (buyGap - (System.currentTimeMillis() - lastBuy)) / 60_000L + 1
+                        logLine("买药未到期，剩余 $leftMin 分钟")
                     }
                     closeAllGreenX()
                     val mapName = readMapName()
@@ -1564,12 +1623,209 @@ private fun coord(name: String, def: FloatArray): FloatArray {
         }
         return diff.toFloat() / a.size
     }
+    /** 按钮橙色判定 */
+    private fun isOrange(c: Int): Boolean {
+        val r = (c shr 16) and 0xFF
+        val g = (c shr 8) and 0xFF
+        val b = c and 0xFF
+        return r >= 190 && g in 110..215 && b <= 120 && r > g && g > b
+    }
+
+    private var cancelBtnTemplateCache: Triple<Int, Int, FloatArray>? = null
+    private val cancelBtnTemplate: Triple<Int, Int, FloatArray>?
+        get() {
+            cancelBtnTemplateCache?.let { return it }
+            return try {
+                val bytes = assets.open("cancelbtn.png").readBytes()
+                val bmp = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return null
+                val w = bmp.width
+                val h = bmp.height
+                val data = FloatArray(w * h)
+                for (y in 0 until h) {
+                    for (x in 0 until w) {
+                        val c = bmp.getPixel(x, y)
+                        data[y * w + x] = 0.299f * ((c shr 16) and 0xFF) +
+                            0.587f * ((c shr 8) and 0xFF) + 0.114f * (c and 0xFF)
+                    }
+                }
+                bmp.recycle()
+                val t = Triple(w, h, data)
+                cancelBtnTemplateCache = t
+                t
+            } catch (_: Exception) { null }
+        }
+
+    /**
+     * 用 assets/cancelbtn.png 匹配弹框里的「取消」按钮（与绿叉同一套 NCC）。
+     * 先在画面中部用橙色粗筛，再做模板匹配，返回截图坐标中心。
+     */
+    private fun findCancelButton(bmp: Bitmap): Pair<Int, Int>? {
+        val tpl = cancelBtnTemplate ?: return null
+        val gx0 = (bmp.width * 0.20f).toInt()
+        val gy0 = (bmp.height * 0.25f).toInt()
+        val gx1 = (bmp.width * 0.85f).toInt()
+        val gy1 = (bmp.height * 0.90f).toInt()
+        val cw = gx1 - gx0
+        val ch = gy1 - gy0
+        if (cw <= 40 || ch <= 40) return null
+        val region = Bitmap.createBitmap(bmp, gx0, gy0, cw, ch)
+        val coarseW = 400
+        val f = minOf(1f, coarseW.toFloat() / cw)
+        val sw = (cw * f).toInt().coerceAtLeast(1)
+        val sh = (ch * f).toInt().coerceAtLeast(1)
+        val scaled = Bitmap.createScaledBitmap(region, sw, sh, true)
+        if (region !== scaled) region.recycle()
+        val colors = IntArray(sw * sh)
+        val gray = FloatArray(sw * sh)
+        for (y in 0 until sh) {
+            for (x in 0 until sw) {
+                val c = scaled.getPixel(x, y)
+                colors[y * sw + x] = c
+                gray[y * sw + x] = 0.299f * ((c shr 16) and 0xFF) +
+                    0.587f * ((c shr 8) and 0xFF) + 0.114f * (c and 0xFF)
+            }
+        }
+        scaled.recycle()
+        val base = coarseW * bmp.width / (2400f * cw)
+        var bestScore = 0f
+        var bestCx = -1
+        var bestCy = -1
+        for (mul in floatArrayOf(0.9f, 1f, 1.1f)) {
+            val s = base * mul
+            val tw = (tpl.first * s).toInt().coerceAtLeast(8)
+            val th = (tpl.second * s).toInt().coerceAtLeast(8)
+            if (tw >= sw || th >= sh) continue
+            val n = tw * th
+            val scaledTpl = FloatArray(n)
+            for (ty in 0 until th) {
+                val sy = ty * tpl.second / th
+                for (tx in 0 until tw) {
+                    scaledTpl[ty * tw + tx] = tpl.third[sy * tpl.first + tx * tpl.first / tw]
+                }
+            }
+            val mask = BooleanArray(n)
+            val rad = minOf(tw, th) / 2f
+            var maskCount = 0
+            for (ty in 0 until th) {
+                for (tx in 0 until tw) {
+                    val dx = tx + 0.5f - tw / 2f
+                    val dy = ty + 0.5f - th / 2f
+                    if (dx * dx + dy * dy <= rad * rad) {
+                        mask[ty * tw + tx] = true
+                        maskCount++
+                    }
+                }
+            }
+            var y = 0
+            while (y + th < sh) {
+                var x = 0
+                while (x + tw < sw) {
+                    val mid = (y + th / 2) * sw
+                    if (isOrange(colors[mid + x + tw / 4]) || isOrange(colors[mid + x + tw * 3 / 4])) {
+                        var sumI = 0f; var sumT = 0f; var sumII = 0f; var sumTT = 0f; var sumIT = 0f
+                        var idx = 0
+                        while (idx < n) {
+                            if (mask[idx]) {
+                                val ty = idx / tw
+                                val tx = idx % tw
+                                val iv = gray[(y + ty) * sw + (x + tx)]
+                                val tv = scaledTpl[idx]
+                                sumI += iv; sumT += tv; sumII += iv * iv; sumTT += tv * tv; sumIT += iv * tv
+                            }
+                            idx++
+                        }
+                        val den = kotlin.math.sqrt(
+                            (maskCount * sumII - sumI * sumI) * (maskCount * sumTT - sumT * sumT)
+                        )
+                        val score = if (den > 1e-3f) ((maskCount * sumIT - sumI * sumT) / den) else 0f
+                        if (score > bestScore) {
+                            bestScore = score
+                            bestCx = x + tw / 2
+                            bestCy = y + th / 2
+                        }
+                    }
+                    x += 2
+                }
+                y += 2
+            }
+        }
+        if (bestScore < 0.65f || bestCx < 0) return null
+        val cx = gx0 + (bestCx / f).toInt()
+        val cy = gy0 + (bestCy / f).toInt()
+        val center = refineCancelCenter(bmp, cx, cy, tpl.first, tpl.second) ?: return null
+        logLine("取消按钮匹配 score=" + java.lang.String.format("%.3f", bestScore) + " ($cx,$cy) -> 按钮中心(${center.first},${center.second})")
+        return center
+    }
+
+    /** 以匹配点为起点，在附近找橙色按钮块，返回块中心（避免匹配偏到按钮边缘） */
+    private fun refineCancelCenter(bmp: Bitmap, cx: Int, cy: Int, tplW: Int, tplH: Int): Pair<Int, Int>? {
+        val scale = bmp.width / 2400f
+        val nativeW = (tplW * scale).toInt().coerceAtLeast(24)
+        val nativeH = (tplH * scale).toInt().coerceAtLeast(12)
+        val x0 = (cx - nativeW).coerceAtLeast(0)
+        val x1 = (cx + nativeW).coerceAtMost(bmp.width - 1)
+        val y0 = (cy - nativeH).coerceAtLeast(0)
+        val y1 = (cy + nativeH).coerceAtMost(bmp.height - 1)
+        val step = 2
+        val gw = (x1 - x0) / step
+        val gh = (y1 - y0) / step
+        if (gw <= 0 || gh <= 0) return null
+        val mask = BooleanArray(gw * gh)
+        for (gy in 0 until gh) {
+            for (gx in 0 until gw) {
+                if (isOrange(bmp.getPixel(x0 + gx * step, y0 + gy * step))) mask[gy * gw + gx] = true
+            }
+        }
+        val seen = BooleanArray(gw * gh)
+        val q = java.util.ArrayDeque<Int>()
+        var best: Pair<Int, Int>? = null
+        var bestDist = Double.MAX_VALUE
+        for (i in mask.indices) {
+            if (!mask[i] || seen[i]) continue
+            seen[i] = true
+            q.add(i)
+            var minX = gw; var minY = gh; var maxX = 0; var maxY = 0
+            while (q.isNotEmpty()) {
+                val idx = q.poll() ?: continue
+                val px = idx % gw
+                val py = idx / gw
+                if (px < minX) minX = px
+                if (px > maxX) maxX = px
+                if (py < minY) minY = py
+                if (py > maxY) maxY = py
+                for (dy in -1..1) {
+                    for (dx in -1..1) {
+                        val nx = px + dx
+                        val ny = py + dy
+                        if (nx in 0 until gw && ny in 0 until gh) {
+                            val ni = ny * gw + nx
+                            if (mask[ni] && !seen[ni]) {
+                                seen[ni] = true
+                                q.add(ni)
+                            }
+                        }
+                    }
+                }
+            }
+            val bw = (maxX - minX + 1) * step
+            val bh = (maxY - minY + 1) * step
+            if (bw < nativeW * 0.6f || bw > nativeW * 1.6f || bh < nativeH * 0.5f || bh > nativeH * 2.0f) continue
+            val bx = x0 + (minX + maxX) / 2 * step
+            val by = y0 + (minY + maxY) / 2 * step
+            val dist = kotlin.math.hypot((bx - cx).toDouble(), (by - cy).toDouble())
+            if (dist < bestDist) {
+                bestDist = dist
+                best = bx to by
+            }
+        }
+        return best
+    }
     private suspend fun closeAllGreenX(): Boolean {
         val closeT0 = System.currentTimeMillis()
         logLine("关闭弹窗：开始检测绿叉")
         var rounds = 0
         var remaining = false
-        while (rounds < 3) {
+        while (rounds < 4) {
             rounds++
             var bmp = capture()
             var tryN = 0
@@ -1584,12 +1840,25 @@ private fun coord(name: String, def: FloatArray): FloatArray {
                 break
             }
             val xs = findGreenXs(bmp)
-            bmp.recycle()
             if (xs.isEmpty()) {
+                val cancel = findCancelButton(bmp)
+                bmp.recycle()
+                if (cancel != null) {
+                    val (rx, ry) = capToReal(cancel.first, cancel.second)
+                    val longSide = maxOf(inputW, inputH).toFloat().coerceAtLeast(1f)
+                    val shortSide = minOf(inputW, inputH).toFloat().coerceAtLeast(1f)
+                    logLine("发现弹框取消按钮，点击 ($rx,$ry)")
+                    tap(floatArrayOf(rx / longSide, ry / shortSide))
+                    remaining = true
+                    setStatus("已点击弹框取消")
+                    delay(3000)
+                    continue
+                }
                 setStatus("绿叉未命中 最高分=" + java.lang.String.format("%.3f", lastGreenXBest))
                 remaining = false
                 break
             }
+            bmp.recycle()
             remaining = true
             setStatus("发现绿叉 " + xs.size + " 个，逐个关闭")
             val longSide = maxOf(inputW, inputH).toFloat().coerceAtLeast(1f)
@@ -1944,7 +2213,9 @@ private fun coord(name: String, def: FloatArray): FloatArray {
     private fun capToReal(x: Int, y: Int): Pair<Int, Int> {
         val longReal = maxOf(inputW, inputH)
         val shortReal = minOf(inputW, inputH)
-        val g = currentGameRect
+        var g = currentGameRect
+        // 启动时还没识别过画面，游戏区默认是 0x0，直接用整屏，避免坐标被放大
+        if (g.width() <= 1 || g.height() <= 1) g = Rect(0, 0, screenW, screenH)
         val gl = g.left.coerceAtLeast(0)
         val gt = g.top.coerceAtLeast(0)
         val gr = g.right.coerceAtMost(screenW)
