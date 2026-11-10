@@ -994,24 +994,26 @@ private fun coord(name: String, def: FloatArray): FloatArray {
 
     /** 打开改良页：多轮监测，优先等进入战斗后用左上角箭头入口，直到打开成功 */
     private suspend fun openImprovePage(): Boolean {
-        for (round in 1..10) {
-            if (isImproveOpen()) return true
-            if (!isCombatPage()) {
-                logLine("改良第 $round 轮：未在战斗，等待 5 秒")
-                delay(5000)
+        var combatFails = 0
+        for (round in 1..20) {
+            // 战斗只有几秒，检测到就立刻点箭头，前面不再插 OCR
+            if (isCombatPage()) {
+                logLine("改良第 $round 轮：战斗入口，立即点箭头")
+                tap(coord("combatArrow", coordDefaults["combatArrow"]!!)); delay(2000)
+                tap(coord("combatImprove", coordDefaults["combatImprove"]!!)); delay(3000)
+                if (isImproveOpen()) {
+                    logLine("改良页已打开")
+                    return true
+                }
+                combatFails++
+                logLine("改良第 $round 轮未打开，继续等下一场战斗")
+                // 清弹窗比较慢，别每次都跑，避免吃掉下一场战斗的时间
+                if (combatFails % 3 == 0) closeAllGreenX()
                 continue
             }
-            logLine("改良第 $round 轮：战斗入口")
-            tap(coord("combatArrow", coordDefaults["combatArrow"]!!)); delay(2000)
-            tap(coord("combatImprove", coordDefaults["combatImprove"]!!)); delay(3000)
-            if (isImproveOpen()) {
-                logLine("改良页已打开")
-                return true
-            }
-            // 失败：误触可能打开了弹框，先清掉再进下一轮
-            logLine("改良第 $round 轮未打开，清理弹框后重试")
-            closeAllGreenX()
-            delay(3000)
+            if (isImproveOpen()) return true
+            // 战斗间隔不长，缩短轮询避免错过开场
+            delay(1000)
         }
         logLine("改良页多轮尝试仍未打开")
         return false
