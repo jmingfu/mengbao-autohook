@@ -10,8 +10,8 @@ android {
         applicationId 'com.jmf.autohook'
         minSdk 24
         targetSdk 34
-        versionCode 24
-        versionName '1.0.24d'
+        versionCode 25
+        versionName '1.0.25a'
     }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17

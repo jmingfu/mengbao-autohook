@@ -606,7 +606,16 @@ private fun coord(name: String, def: FloatArray): FloatArray {
 
             val spMap = android.widget.Spinner(this)
             val maps = AfkProfile.values().map { it.label }
-            spMap.adapter = android.widget.ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, maps)
+            spMap.adapter = object : android.widget.ArrayAdapter<String>(
+                this, android.R.layout.simple_spinner_dropdown_item, maps) {
+                override fun getView(position: Int, convertView: android.view.View?, parent: android.view.ViewGroup): android.view.View {
+                    val v = super.getView(position, convertView, parent) as android.widget.TextView
+                    v.textSize = 16f
+                    v.setTextColor(0xFFFFFF00.toInt())
+                    v.setTypeface(null, android.graphics.Typeface.BOLD)
+                    return v
+                }
+            }
             spMap.setSelection(maps.indexOf(selectedAfkProfile(prefs).label), false)
             spMap.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
                 override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: android.view.View?, position: Int, id: Long) {
@@ -662,39 +671,6 @@ private fun coord(name: String, def: FloatArray): FloatArray {
                 }
             }
             mapRow.addView(btnLog)
-            val buyRow = android.widget.LinearLayout(this).apply {
-                orientation = android.widget.LinearLayout.HORIZONTAL
-                gravity = android.view.Gravity.CENTER_VERTICAL
-            }
-            buyRow.addView(android.widget.TextView(this).apply {
-                text = "买药间隔"
-                textSize = 12f
-                setTextColor(0xFFFFFFFFL.toInt())
-            }, android.widget.LinearLayout.LayoutParams(0,
-                android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-            val buyEt = android.widget.EditText(this).apply {
-                setText(prefs.getInt("intervalBuy", 60).toString())
-                textSize = 12f
-                inputType = android.text.InputType.TYPE_CLASS_NUMBER
-                setTextColor(0xFFFFFFFFL.toInt())
-                layoutParams = android.widget.LinearLayout.LayoutParams((64 * d).toInt(),
-                    android.view.ViewGroup.LayoutParams.WRAP_CONTENT)
-                addTextChangedListener(object : android.text.TextWatcher {
-                    override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
-                    override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
-                    override fun afterTextChanged(s: android.text.Editable?) {
-                        val v = s?.toString()?.toIntOrNull()
-                        if (v != null && v > 0) prefs.edit().putInt("intervalBuy", v).apply()
-                    }
-                })
-            }
-            buyRow.addView(buyEt)
-            buyRow.addView(android.widget.TextView(this).apply {
-                text = "分"
-                textSize = 11f
-                setTextColor(0xFFCCCCCCL.toInt())
-            })
-            root.addView(buyRow)
             root.addView(mapRow)
 
             val scroll = android.widget.ScrollView(this)
@@ -827,19 +803,24 @@ private fun coord(name: String, def: FloatArray): FloatArray {
     }
 
     private fun choresDue(prefs: android.content.SharedPreferences): Boolean {
-        if (prefs.getString("lastChoresDate", null) == todayKey()) return false
-        // 每天生成一次 0~60 分钟随机偏移，避免凌晨同一时间集中执行
-        val today = todayKey()
-        var offMin = prefs.getInt("choresOffsetMin", -1)
-        if (prefs.getString("choresOffsetDate", null) != today || offMin < 0) {
-            offMin = java.util.Random().nextInt(61)
-            prefs.edit().putString("choresOffsetDate", today).putInt("choresOffsetMin", offMin).apply()
-            logLine("日常随机偏移: " + offMin + " 分钟")
-        }
-        val dueAt = localMidnightMillis() + offMin * 60_000L
-        if (System.currentTimeMillis() < dueAt) return false
+        // 日常（清背包/修理/分解整块流程）间隔：单位小时，低于 1 按 1、高于 24 按 24
+        // 默认 24 小时 = 每天一次，保持凌晨处理（当天 0 点 + 0~60 分钟随机偏移后到期）
+        val hours = prefs.getInt("intervalDecompose", 24).coerceIn(1, 24)
         val lastTry = prefs.getLong("lastChoresTry", 0L)
-        return System.currentTimeMillis() - lastTry > 10 * 60 * 1000L
+        if (hours >= 24) {
+            if (prefs.getString("lastChoresDate", null) == todayKey()) return false
+            val today = todayKey()
+            var offMin = prefs.getInt("choresOffsetMin", -1)
+            if (prefs.getString("choresOffsetDate", null) != today || offMin < 0) {
+                offMin = java.util.Random().nextInt(61)
+                prefs.edit().putString("choresOffsetDate", today).putInt("choresOffsetMin", offMin).apply()
+                logLine("日常随机偏移: " + offMin + " 分钟")
+            }
+            val dueAt = localMidnightMillis() + offMin * 60_000L
+            if (System.currentTimeMillis() < dueAt) return false
+            return System.currentTimeMillis() - lastTry > 10 * 60 * 1000L
+        }
+        return System.currentTimeMillis() - lastTry >= hours * 3600_000L
     }
 
     private fun coordOrNull(name: String): FloatArray? {

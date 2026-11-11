@@ -38,6 +38,10 @@ class MainActivity : AppCompatActivity() {
             prefs.edit().putString("captureRes", "自动跟随屏幕").putBoolean("captureResMigratedAuto", true).apply()
         }
         etInterval.setText(prefs.getInt("interval", 300).toString())
+        val etIntervalBuy = findViewById<EditText>(R.id.etIntervalBuy)
+        etIntervalBuy.setText(prefs.getInt("intervalBuy", 60).toString())
+        val etIntervalDecomp = findViewById<EditText>(R.id.etIntervalDecomp)
+        etIntervalDecomp.setText(prefs.getInt("intervalDecompose", 24).toString())
 
         val btnProjection = findViewById<Button>(R.id.btnProjection)
         val tvStatus = findViewById<TextView>(R.id.tvStatus)
@@ -93,6 +97,8 @@ class MainActivity : AppCompatActivity() {
                 return@setOnClickListener
             }
             saveCfg(etInterval)
+            saveIntervalBuy(etIntervalBuy)
+            saveIntervalDecomp(etIntervalDecomp)
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
                 != PackageManager.PERMISSION_GRANTED) {
                 ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), notificationRequest)
@@ -126,6 +132,16 @@ class MainActivity : AppCompatActivity() {
         getSharedPreferences("cfg", Context.MODE_PRIVATE).edit()
             .putInt("interval", etInterval.text.toString().toIntOrNull() ?: 300)
             .apply()
+    }
+
+    private fun saveIntervalBuy(et: EditText) {
+        val v = (et.text.toString().toIntOrNull() ?: 60).coerceAtLeast(1)
+        getSharedPreferences("cfg", Context.MODE_PRIVATE).edit().putInt("intervalBuy", v).apply()
+    }
+
+    private fun saveIntervalDecomp(et: EditText) {
+        val v = (et.text.toString().toIntOrNull() ?: 24).coerceIn(1, 24)
+        getSharedPreferences("cfg", Context.MODE_PRIVATE).edit().putInt("intervalDecompose", v).apply()
     }
 
     private fun askProjection() {

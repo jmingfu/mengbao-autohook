@@ -33,6 +33,30 @@
         android:layout_height="wrap_content"
         android:paddingTop="10dp"
         android:textSize="14sp"
+        android:text="买药间隔（分钟）" />
+    <EditText
+        android:id="@+id/etIntervalBuy"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:inputType="number"
+        android:hint="如 60" />
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingTop="10dp"
+        android:textSize="14sp"
+        android:text="分解间隔（小时，1~24）" />
+    <EditText
+        android:id="@+id/etIntervalDecomp"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:inputType="number"
+        android:hint="如 24" />
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingTop="10dp"
+        android:textSize="14sp"
         android:text="挂机地图" />
     <Spinner
         android:id="@+id/spAfkMap"
