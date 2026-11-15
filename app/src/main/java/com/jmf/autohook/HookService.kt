@@ -69,6 +69,13 @@ class HookService : AccessibilityService() {
     // ===== 主城识别（模板优先，懒加载） =====
     private data class HomeTpl(val label: String, val bmp: Bitmap, val gray: ByteArray, val mean: Float, val std: Float)
     private var homeTpls: List<HomeTpl>? = null
+    // 每个主城模板自己的区域（720/1080 布局不同，不能共用比例）
+    private val homeRects = mapOf(
+        "digebao" to floatArrayOf(187f / 2400f, 4f / 1080f, 370f / 2400f, 47f / 1080f),
+        "ziyouzhidu" to floatArrayOf(187f / 2400f, 4f / 1080f, 370f / 2400f, 47f / 1080f),
+        "digebao_720" to floatArrayOf(64f / 1280f, 2f / 720f, 190f / 1280f, 41f / 720f),
+        "ziyouzhidu_720" to floatArrayOf(64f / 1280f, 2f / 720f, 190f / 1280f, 41f / 720f),
+    )
     private val homeScaledCache = HashMap<String, ByteArray>()
     private var gameRectKey: String? = null
     private var homeRoiKey: String? = null
@@ -1884,38 +1891,33 @@ private fun coord(name: String, def: FloatArray): FloatArray {
     private fun matchHomeCity(bmp: Bitmap, g: Rect): Pair<String, Float>? {
         val tpls = homeTemplates()
         if (tpls.isEmpty()) return null
-        val rx0 = 187f / 2400f; val ry0 = 4f / 1080f
-        val rx1 = 370f / 2400f; val ry1 = 47f / 1080f
-        var x = g.left + (rx0 * g.width()).toInt()
-        var y = g.top + (ry0 * g.height()).toInt()
-        var w = ((rx1 - rx0) * g.width()).toInt().coerceAtLeast(8)
-        var h = ((ry1 - ry0) * g.height()).toInt().coerceAtLeast(6)
-        if (x < 0) x = 0
-        if (y < 0) y = 0
-        if (x + w > bmp.width) w = bmp.width - x
-        if (y + h > bmp.height) h = bmp.height - y
-        if (w < 8 || h < 6) return null
-        val roiKey = "${w}x$h"
-        if (homeRoiKey != roiKey) {
-            homeRoiKey = roiKey
-            logLine("主城名ROI: $roiKey")
-        }
-        val roi = Bitmap.createBitmap(bmp, x, y, w, h)
-        val px = IntArray(w * h)
-        roi.getPixels(px, 0, w, 0, 0, w, h)
-        roi.recycle()
-        val gray = ByteArray(px.size)
-        for (i in px.indices) {
-            val c = px[i]
-            gray[i] = ((c shr 16 and 0xFF) * 0.299f + (c shr 8 and 0xFF) * 0.587f + (c and 0xFF) * 0.114f).toInt().toByte()
-        }
         var bestLabel = ""
         var best = -1f
         for (t in tpls) {
+            val r = homeRects[t.label] ?: continue
+            var x = g.left + (r[0] * g.width()).toInt()
+            var y = g.top + (r[1] * g.height()).toInt()
+            var w = ((r[2] - r[0]) * g.width()).toInt().coerceAtLeast(8)
+            var h = ((r[3] - r[1]) * g.height()).toInt().coerceAtLeast(6)
+            x = x.coerceAtLeast(0)
+            y = y.coerceAtLeast(0)
+            if (x + w > bmp.width) w = bmp.width - x
+            if (y + h > bmp.height) h = bmp.height - y
+            if (w < 8 || h < 6) continue
+            val roi = Bitmap.createBitmap(bmp, x, y, w, h)
+            val px = IntArray(w * h)
+            roi.getPixels(px, 0, w, 0, 0, w, h)
+            roi.recycle()
+            val gray = ByteArray(px.size)
+            for (i in px.indices) {
+                val c = px[i]
+                gray[i] = ((c shr 16 and 0xFF) * 0.299f + (c shr 8 and 0xFF) * 0.587f + (c and 0xFF) * 0.114f).toInt().toByte()
+            }
             val tg = scaledTplGray(t, w, h)
             val s = nccScore(gray, tg, w, h, 3)
             if (s > best) { best = s; bestLabel = t.label }
         }
+        if (bestLabel.isEmpty()) return null
         return Pair(bestLabel, best)
     }
 
