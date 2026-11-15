@@ -83,9 +83,12 @@ class HookService : AccessibilityService() {
         "popup" to floatArrayOf(840f / 2400f, 420f / 1080f, 1575f / 2400f, 513f / 1080f),
         "popup_720" to floatArrayOf(840f / 2400f, 420f / 1080f, 1575f / 2400f, 513f / 1080f),
         "lian" to floatArrayOf(2055f / 2400f, 925f / 1080f, 2125f / 2400f, 980f / 1080f),
-        "gong" to floatArrayOf(2190f / 2400f, 925f / 1080f, 2260f / 2400f, 980f / 1080f),
-        "teji" to floatArrayOf(2200f / 2400f, 850f / 1080f, 2310f / 2400f, 915f / 1080f),
-        "chongji" to floatArrayOf(2200f / 2400f, 725f / 1080f, 2310f / 2400f, 795f / 1080f),
+        "gong" to floatArrayOf(1150f / 1280f, 610f / 720f, 1268f / 1280f, 680f / 720f),
+        "gong_720" to floatArrayOf(1150f / 1280f, 610f / 720f, 1268f / 1280f, 680f / 720f),
+        "teji" to floatArrayOf(1150f / 1280f, 540f / 720f, 1268f / 1280f, 615f / 720f),
+        "teji_720" to floatArrayOf(1150f / 1280f, 540f / 720f, 1268f / 1280f, 615f / 720f),
+        "chongji" to floatArrayOf(1150f / 1280f, 450f / 720f, 1268f / 1280f, 545f / 720f),
+        "chongji_720" to floatArrayOf(1150f / 1280f, 450f / 720f, 1268f / 1280f, 545f / 720f),
     )
 
     // ===== 坐标配置（比例按真实横屏分辨率 2400x1080 测得）=====
