@@ -6,12 +6,18 @@ plugins {
 android {
     namespace 'com.jmf.autohook'
     compileSdk 34
+    // 打包命名：梦宝回挂防狗+版本号
+    applicationVariants.all { variant ->
+        variant.outputs.all { output ->
+            outputFileName = "梦宝回挂防狗${variant.versionName}.apk"
+        }
+    }
     defaultConfig {
         applicationId 'com.jmf.autohook'
         minSdk 24
         targetSdk 34
-        versionCode 25
-        versionName '1.0.25a'
+        versionCode 28
+        versionName '1.0.28c'
     }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
@@ -24,6 +30,4 @@ dependencies {
     implementation 'androidx.core:core-ktx:1.13.1'
     implementation 'androidx.appcompat:appcompat:1.7.0'
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1'
-    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.8.1'
-    implementation 'com.google.mlkit:text-recognition-chinese:16.0.1'
 }

@@ -42,6 +42,10 @@ class MainActivity : AppCompatActivity() {
         etIntervalBuy.setText(prefs.getInt("intervalBuy", 60).toString())
         val etIntervalDecomp = findViewById<EditText>(R.id.etIntervalDecomp)
         etIntervalDecomp.setText(prefs.getInt("intervalDecompose", 24).toString())
+        val cbDecompose = findViewById<android.widget.CheckBox>(R.id.cbDecompose)
+        cbDecompose.isChecked = prefs.getBoolean("enableDecompose", true)
+        val cbBuy = findViewById<android.widget.CheckBox>(R.id.cbBuy)
+        cbBuy.isChecked = prefs.getBoolean("enableBuy", true)
 
         val btnProjection = findViewById<Button>(R.id.btnProjection)
         val tvStatus = findViewById<TextView>(R.id.tvStatus)
@@ -99,6 +103,8 @@ class MainActivity : AppCompatActivity() {
             saveCfg(etInterval)
             saveIntervalBuy(etIntervalBuy)
             saveIntervalDecomp(etIntervalDecomp)
+            prefs.edit().putBoolean("enableDecompose", cbDecompose.isChecked).apply()
+            prefs.edit().putBoolean("enableBuy", cbBuy.isChecked).apply()
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
                 != PackageManager.PERMISSION_GRANTED) {
                 ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), notificationRequest)
@@ -145,17 +151,58 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun askProjection() {
+        tryRootEnableIfNeeded()
         if (!Settings.canDrawOverlays(this)) {
-            Toast.makeText(this, "请先授予「显示在其他应用上层」权限", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "悬浮窗未授权，且 root 授权失败，请手动授予「显示在其他应用上层」权限", Toast.LENGTH_LONG).show()
             startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, android.net.Uri.parse("package:$packageName")))
             return
         }
         val am = getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
         val enabled = am.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
             .any { it.id.startsWith(packageName) }
-        if (!enabled) { Toast.makeText(this, "请先开启无障碍服务", Toast.LENGTH_LONG).show(); return }
+        if (!enabled) { Toast.makeText(this, "无障碍未授权，且 root 授权失败，请手动开启无障碍服务", Toast.LENGTH_LONG).show(); return }
         val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         startActivityForResult(mpm.createScreenCaptureIntent(), projectionRequest)
+    }
+
+    /** 用 root 直接写系统设置，自动开启无障碍服务和悬浮窗权限（云手机/已 root 设备适用） */
+    private fun tryRootEnableIfNeeded() {
+        val overlayOk = Settings.canDrawOverlays(this)
+        val am = getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
+        val accessibilityOk = am.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
+            .any { it.id.startsWith(packageName) }
+        if (overlayOk && accessibilityOk) return
+
+        try {
+            val su = Runtime.getRuntime().exec("su")
+            su.outputStream.use { os ->
+                // 悬浮窗：appops 直接放行
+                os.write("appops set $packageName SYSTEM_ALERT_WINDOW allow\n".toByteArray())
+                // 无障碍：读出已有服务列表，追加自己，不覆盖其他应用
+                val d = "$"
+                os.write("""current=${d}(settings get secure enabled_accessibility_services);
+me=$packageName/$packageName.HookService;
+case ";${d}current" in *";${d}me"*) ;; *) if [ -z "${d}current" ] || [ "${d}current" = "null" ]; then new="${d}me"; else new="${d}current:${d}me"; fi; settings put secure enabled_accessibility_services "${d}new";; esac
+settings put secure accessibility_enabled 1
+""".toByteArray())
+                os.write("exit\n".toByteArray())
+                os.flush()
+            }
+            su.waitFor()
+            su.destroy()
+            // 给系统一点时间完成服务绑定
+            if (!accessibilityOk) {
+                for (i in 1..10) {
+                    Thread.sleep(300)
+                    val ok = (getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager)
+                        .getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
+                        .any { it.id.startsWith(packageName) }
+                    if (ok) break
+                }
+            }
+        } catch (_: Exception) {
+            // 无 root 或执行失败：走原有手动授权提示
+        }
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {

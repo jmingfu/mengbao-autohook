@@ -52,6 +52,21 @@
         android:layout_height="wrap_content"
         android:inputType="number"
         android:hint="如 24" />
+    <CheckBox
+        android:id="@+id/cbDecompose"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingTop="10dp"
+        android:textSize="14sp"
+        android:checked="true"
+        android:text="执行分解+修理" />
+    <CheckBox
+        android:id="@+id/cbBuy"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textSize="14sp"
+        android:checked="true"
+        android:text="执行买药+出售" />
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
