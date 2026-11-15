@@ -1093,35 +1093,23 @@ private fun coord(name: String, def: FloatArray): FloatArray {
         var fails = 0
         val deadline = System.currentTimeMillis() + 90_000
         while (System.currentTimeMillis() < deadline) {
-            // 页面可能上一轮已经打开，先确认一次
-            if (isImproveOpen(quiet = true)) {
-                logLine("改良页已打开")
-                return true
-            }
-            // 1) 静默等战斗：等的时候不刷“改良页校验”
-            var inCombat = false
-            while (System.currentTimeMillis() < deadline) {
-                if (isCombatPage(quiet = true)) { inCombat = true; break }
+            // 没战斗就等，检测到战斗才点击
+            if (!isCombatPage(quiet = true)) {
                 delay(300)
+                continue
             }
-            if (!inCombat) break
 
             logLine("改良：检测到战斗，点箭头进改良（第 ${fails + 1} 次）")
             tap(coord("combatArrow", coordDefaults["combatArrow"]!!)); delay(2000)
             tap(coord("combatImprove", coordDefaults["combatImprove"]!!)); delay(3000)
 
-            // 2) 只在点击后校验，最多 3 次、每次隔 1 秒；成功/失败各只打一行
-            var opened = false
-            for (k in 1..3) {
-                if (isImproveOpen(quiet = true)) { opened = true; break }
-                delay(1000)
-            }
-            if (opened) {
+            // 点完只校验一次：没进说明这次没成功，立刻重来，不在这里反复等
+            if (isImproveOpen(quiet = true)) {
                 logLine("改良页已打开")
                 return true
             }
             fails++
-            logLine("改良第 $fails 次未打开，清理弹窗后重新等战斗")
+            logLine("改良第 $fails 次没进入，立即重新开始改良流程")
             quickClosePopup()
             if (fails % 3 == 0) closeAllGreenX()
         }
