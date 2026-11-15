@@ -235,7 +235,7 @@ enum class DeviceProfile(val label: String, val key: String, val coords: Map<Str
         "improveItem" to floatArrayOf(0.2977f, 0.2958f),
         "improveEntry" to floatArrayOf(0.5922f, 0.9361f),
         "hookBtn" to floatArrayOf(0.3945f, 0.0458f),
-        "regionCloseBtn" to floatArrayOf(0.8805f, 0.1111f),
+        "regionCloseBtn" to floatArrayOf(0.8898f, 0.0847f),
     )),
     YUN_1080_2400("1080*2400", "2400x1080", mapOf(
         "mapNameBox" to floatArrayOf(0.0938f, 0.0475f),
