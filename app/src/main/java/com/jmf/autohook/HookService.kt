@@ -1021,7 +1021,7 @@ private fun coord(name: String, def: FloatArray): FloatArray {
     }
 
     /** 战斗页判定：右下角四个标注里至少两个模板命中 */
-    private fun isCombatPage(): Boolean {
+    private fun isCombatPage(quiet: Boolean = false): Boolean {
         val t0 = System.currentTimeMillis()
         val bmp = capture() ?: return false
         return try {
@@ -1029,10 +1029,12 @@ private fun coord(name: String, def: FloatArray): FloatArray {
             val names = listOf("lian", "gong", "teji", "chongji")
             val scores = names.map { it to matchRegion(it, bmp, g) }
             val hits = scores.count { it.second >= 0.75f }
-            logLine(
-                "页面判定: " + scores.joinToString(" ") { it.first + "=" + java.lang.String.format("%.2f", it.second) } +
-                    " -> 命中=$hits 用时 ${System.currentTimeMillis() - t0}ms"
-            )
+            if (!quiet) {
+                logLine(
+                    "页面判定: " + scores.joinToString(" ") { it.first + "=" + java.lang.String.format("%.2f", it.second) } +
+                        " -> 命中=$hits 用时 ${System.currentTimeMillis() - t0}ms"
+                )
+            }
             hits >= 2
         } finally {
             bmp.recycle()
@@ -1040,13 +1042,15 @@ private fun coord(name: String, def: FloatArray): FloatArray {
     }
 
     /** 改良页判定：标题「改良」模板 */
-    private fun isImproveOpen(): Boolean {
+    private fun isImproveOpen(quiet: Boolean = false): Boolean {
         val t0 = System.currentTimeMillis()
         val bmp = capture() ?: return false
         return try {
             val g = ensureGameRect(bmp)
             val s = matchRegion("improve", bmp, g)
-            logLine("改良页校验: score=" + java.lang.String.format("%.2f", s) + " -> ${s >= 0.80f} 用时 ${System.currentTimeMillis() - t0}ms")
+            if (!quiet) {
+                logLine("改良页校验: score=" + java.lang.String.format("%.2f", s) + " -> ${s >= 0.80f} 用时 ${System.currentTimeMillis() - t0}ms")
+            }
             s >= 0.80f
         } finally {
             bmp.recycle()
@@ -1086,32 +1090,42 @@ private fun coord(name: String, def: FloatArray): FloatArray {
 
     /** 打开改良页：多轮监测，优先等进入战斗后用左上角箭头入口，直到打开成功 */
     private suspend fun openImprovePage(): Boolean {
-        var combatFails = 0
-        for (round in 1..20) {
-            // 战斗只有几秒，检测到就立刻点箭头，前面不再插 OCR
-            if (isCombatPage()) {
-                logLine("改良第 $round 轮：战斗入口，立即点箭头")
-                tap(coord("combatArrow", coordDefaults["combatArrow"]!!)); delay(2000)
-                tap(coord("combatImprove", coordDefaults["combatImprove"]!!)); delay(3000)
-                if (isImproveOpen()) {
-                    logLine("改良页已打开")
-                    return true
-                }
-                combatFails++
-                logLine("改良第 $round 轮未打开，继续等下一场战斗")
-                if (quickClosePopup()) {
-                    logLine("已清理误触弹窗，继续")
-                    continue
-                }
-                // 清弹窗比较慢，别每次都跑，避免吃掉下一场战斗的时间
-                if (combatFails % 3 == 0) closeAllGreenX()
-                continue
+        var fails = 0
+        val deadline = System.currentTimeMillis() + 90_000
+        while (System.currentTimeMillis() < deadline) {
+            // 页面可能上一轮已经打开，先确认一次
+            if (isImproveOpen(quiet = true)) {
+                logLine("改良页已打开")
+                return true
             }
-            if (isImproveOpen()) return true
-            // 战斗间隔不长，高频轮询避免错过开场（日常一天只跑一次）
-            delay(300)
+            // 1) 静默等战斗：等的时候不刷“改良页校验”
+            var inCombat = false
+            while (System.currentTimeMillis() < deadline) {
+                if (isCombatPage(quiet = true)) { inCombat = true; break }
+                delay(300)
+            }
+            if (!inCombat) break
+
+            logLine("改良：检测到战斗，点箭头进改良（第 ${fails + 1} 次）")
+            tap(coord("combatArrow", coordDefaults["combatArrow"]!!)); delay(2000)
+            tap(coord("combatImprove", coordDefaults["combatImprove"]!!)); delay(3000)
+
+            // 2) 只在点击后校验，最多 3 次、每次隔 1 秒；成功/失败各只打一行
+            var opened = false
+            for (k in 1..3) {
+                if (isImproveOpen(quiet = true)) { opened = true; break }
+                delay(1000)
+            }
+            if (opened) {
+                logLine("改良页已打开")
+                return true
+            }
+            fails++
+            logLine("改良第 $fails 次未打开，清理弹窗后重新等战斗")
+            quickClosePopup()
+            if (fails % 3 == 0) closeAllGreenX()
         }
-        logLine("改良页多轮尝试仍未打开")
+        logLine("改良页未打开（累计失败 $fails 次）")
         return false
     }
     /** 关闭改良页弹框：点叉 → 再点一次叉 → 还不行点确认 */
