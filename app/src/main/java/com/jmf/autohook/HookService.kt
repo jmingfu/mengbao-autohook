@@ -2706,7 +2706,7 @@ private fun coord(name: String, def: FloatArray): FloatArray {
             tap(coord("laijiRow", laijiRow))
             delay(3000)
         }
-        delay(5000)
+        delay(3000)
         // 点完 5 次来吉虾后，先点右上角关闭叉关掉区域地图，再点挂机
         tap(coord("regionCloseBtn", regionCloseBtn)); delay(3000)
         // 兜底清掉其他绿叉弹窗
