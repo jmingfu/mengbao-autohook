@@ -84,7 +84,7 @@ class HookService : AccessibilityService() {
         "popup_720" to floatArrayOf(840f / 2400f, 420f / 1080f, 1575f / 2400f, 513f / 1080f),
         // 战斗判定只看「特技」按钮（圆形木箱图标），720/1080 各自一套位置
         "teji" to floatArrayOf(2176f / 2400f, 792f / 1080f, 2306f / 2400f, 922f / 1080f),
-        "teji_720" to floatArrayOf(1186f / 1280f, 531f / 720f, 1272f / 1280f, 617f / 720f),
+        "teji_720" to floatArrayOf(1187f / 1280f, 520f / 720f, 1272f / 1280f, 603f / 720f),
     )
 
     // ===== 坐标配置（比例按真实横屏分辨率 2400x1080 测得）=====
