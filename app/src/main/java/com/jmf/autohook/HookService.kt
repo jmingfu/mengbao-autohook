@@ -76,9 +76,12 @@ class HookService : AccessibilityService() {
     // ===== 界面状态模板（改良页/分解弹框/战斗页），懒加载 =====
     private data class RegionTpl(val name: String, val bmp: Bitmap, val gray: ByteArray)
     private var regionTpls: Map<String, RegionTpl>? = null
+    private val regionGrayCache = HashMap<String, ByteArray>()
     private val regionRects = mapOf(
-        "improve" to floatArrayOf(1115f / 2400f, 15f / 1080f, 1265f / 2400f, 80f / 1080f),
-        "popup" to floatArrayOf(955f / 2400f, 430f / 1080f, 1470f / 2400f, 510f / 1080f),
+        "improve" to floatArrayOf(1087f / 2400f, 12f / 1080f, 1265f / 2400f, 77f / 1080f),
+        "improve_720" to floatArrayOf(1087f / 2400f, 12f / 1080f, 1265f / 2400f, 77f / 1080f),
+        "popup" to floatArrayOf(840f / 2400f, 420f / 1080f, 1575f / 2400f, 513f / 1080f),
+        "popup_720" to floatArrayOf(840f / 2400f, 420f / 1080f, 1575f / 2400f, 513f / 1080f),
         "lian" to floatArrayOf(2055f / 2400f, 925f / 1080f, 2125f / 2400f, 980f / 1080f),
         "gong" to floatArrayOf(2190f / 2400f, 925f / 1080f, 2260f / 2400f, 980f / 1080f),
         "teji" to floatArrayOf(2200f / 2400f, 850f / 1080f, 2310f / 2400f, 915f / 1080f),
@@ -222,7 +225,7 @@ enum class DeviceProfile(val label: String, val key: String, val coords: Map<Str
         "improvePopupX" to floatArrayOf(0.6484f, 0.2625f),
         "improvePopupConfirm" to floatArrayOf(0.5430f, 0.5681f),
         "improveItem" to floatArrayOf(0.2977f, 0.2958f),
-        "improveEntry" to floatArrayOf(0.5067f, 0.9352f),
+        "improveEntry" to floatArrayOf(0.5922f, 0.9361f),
     )),
     YUN_1080_2400("1080*2400", "2400x1080", mapOf(
         "mapNameBox" to floatArrayOf(0.0938f, 0.0475f),
@@ -1187,6 +1190,8 @@ private fun coord(name: String, def: FloatArray): FloatArray {
         var attempt = 0
         while (running && attempt < 10) {
             attempt++
+            // 每轮重试前先清弹窗，避免残留弹窗被误判成战斗
+            closeAllGreenX()
             setStatus("队长：等待非战斗瞬间（第 $attempt 次）")
             if (!waitIdleForAfkStop(10000)) {
                 logLine("10 秒内没等到非战斗，重试（第 $attempt 次）")
@@ -1199,16 +1204,24 @@ private fun coord(name: String, def: FloatArray): FloatArray {
             while (running && System.currentTimeMillis() - t0 < 15000) {
                 delay(2000)
                 val combat = isCombatPage()
-                if (!combat) streak++ else streak = 0
-                logLine("关闭挂机校验: 战斗中=$combat 连续非战斗=$streak/3（第 $attempt 次）")
-                if (streak >= 3) {
+                if (combat) {
+                    // 中途检测到战斗：本轮直接失败，重新等脱战、重新点挂机
+                    streak = 0
+                    logLine("关闭挂机校验: 检测到战斗，本轮失败，马上重试（第 $attempt 次）@${stamp()}")
+                    break
+                }
+                streak++
+                logLine("关闭挂机校验: 战斗中=$combat 连续非战斗=$streak/4（第 $attempt 次）@${stamp()}")
+                if (streak >= 4) {
+                    // 停挂机后可能弹出提示，先清掉再点改良
+                    closeAllGreenX()
                     setStatus("挂机已停止，点击改良")
                     tap(coord("improveEntry", coordDefaults["improveEntry"]!!))
                     delay(3000)
                     return true
                 }
             }
-            logLine("本轮未连续 3 次非战斗，马上重试（第 $attempt 次）")
+            logLine("本轮未连续 4 次非战斗，马上重试（第 $attempt 次）")
         }
         return false
     }
@@ -1256,12 +1269,18 @@ private fun coord(name: String, def: FloatArray): FloatArray {
     /** 一次完整的清理尝试：开改良 → 修理 → 分解 → 关改良 */
     private suspend fun runImproveOnce(): Boolean {
         val opened = if (role == "队长") {
-            // 队长流程已点过底部「改良」，这里只做校验，必要时补点一次
-            if (isImproveOpen()) true else {
+            // 队长：校验失败就继续点右下角改良重试（最多 8 次，每次间隔 2 秒）
+            var ok = isImproveOpen()
+            var attempt = 0
+            while (!ok && attempt < 8) {
+                attempt++
+                logLine("改良页未确认，点右下角改良（第 $attempt 次）")
                 tap(coord("improveEntry", coordDefaults["improveEntry"]!!))
-                delay(3000)
-                isImproveOpen()
+                delay(2000)
+                ok = isImproveOpen()
+                if (!ok) quickClosePopup()
             }
+            ok
         } else {
             openImprovePage()
         }
@@ -1315,25 +1334,25 @@ private fun coord(name: String, def: FloatArray): FloatArray {
         }
         setStatus("买药：开始")
         closeAllGreenX()
-        tap(avatar); delay(3000)
-        tap(bag); delay(3000)
+        tap(avatar); delay(2000)
+        tap(bag); delay(2000)
         logLine("买药：包裹已打开")
-        tap(shop); delay(3000)
+        tap(shop); delay(2000)
         logLine("买药：商店已打开")
-        tap(sellAll); delay(3000)
-        tap(sellOk); delay(3000)
+        tap(sellAll); delay(2000)
+        tap(sellOk); delay(2000)
         logLine("买药：一键出售完成")
         var done = 0
         for (i in listOf(1, 3)) {
             val med = coordOrNull("med$i") ?: continue
             setStatus("买药：第 $i 种")
-            tap(med); delay(3000)
-            tap(buy); delay(3000)
-            tap(numBox); delay(3000)
+            tap(med); delay(2000)
+            tap(buy); delay(2000)
+            tap(numBox); delay(2000)
             var ready = waitEditableNode(3000)
             if (!ready) {
                 logLine("第 $i 种药：输入框未打开，重点一次")
-                tap(numBox); delay(3000)
+                tap(numBox); delay(2000)
                 ready = waitEditableNode(2000)
             }
             if (!ready) {
@@ -1344,20 +1363,26 @@ private fun coord(name: String, def: FloatArray): FloatArray {
                 logLine("第 $i 种药：写入失败，跳过")
                 continue
             }
-            delay(3000)
+            delay(2000)
             if (!pressImeDone()) logLine("第 $i 种药：未找到输入法完成键")
-            delay(5000)
-            tap(numOk); delay(3000)
+            delay(3000)
+            tap(numOk); delay(2000)
             logLine("第 $i 种药：数量 500 已确认")
             done++
         }
-        coordOrNull("shopClose")?.let { logLine("买药：关闭商店"); tap(it); delay(3000) }
+        coordOrNull("shopClose")?.let { logLine("买药：关闭商店"); tap(it); delay(2000) }
+        // 再点一次关闭商店，防止第一次没关掉
+        coordOrNull("shopClose")?.let { tap(it); delay(2000) }
+        // 买完药可能还留着弹窗/商店残留，先统一关掉，避免后续战斗判定被挡住
+        closeAllGreenX()
         logLine("买药完成，成功=$done")
         prefs.edit().putLong("lastBuyAt", System.currentTimeMillis()).apply()
     }
     private suspend fun runDailyChores(): Boolean {
         lastDailyStatus = "执行中"
         setStatus("开始日常：分解修理")
+        // 进流程前先清干净弹窗，避免残留弹窗导致战斗判定/改良入口失效
+        closeAllGreenX()
         // 队长：先关闭挂机，再进改良页（避免自动战斗把界面顶掉）
         if (role == "队长") {
             setStatus("队长：先关闭挂机")
@@ -1439,10 +1464,15 @@ private fun coord(name: String, def: FloatArray): FloatArray {
                             togglePanel()
                             return true
                         }
+                        // 恢复原始坐标系：与 abs() 点击映射共用 inputW/inputH
                         val longSide = maxOf(inputW, inputH)
                         val shortSide = minOf(inputW, inputH)
                         val rx = ev.rawX / longSide
                         val ry = ev.rawY / shortSide
+                        logLine(
+                            "校准: input=${inputW}x${inputH} " +
+                                "raw=(${ev.rawX},${ev.rawY}) -> (%.4f,%.4f)".format(rx, ry)
+                        )
                         getSharedPreferences("cfg", Context.MODE_PRIVATE).edit()
                             .putString("coord_" + coordPrefix(key) + key, "%.4f,%.4f".format(rx, ry)).apply()
                         android.widget.Toast.makeText(this@HookService,
@@ -1450,6 +1480,8 @@ private fun coord(name: String, def: FloatArray): FloatArray {
                             android.widget.Toast.LENGTH_SHORT).show()
                         calibView?.let { wm.removeView(it) }
                         calibView = null
+                        // 校准值已写入 prefs，面板缓存必须失效，否则输入框还显示旧值
+                        panelDirty = true
                         togglePanel()
                     }
                     return true
@@ -1781,8 +1813,10 @@ private fun coord(name: String, def: FloatArray): FloatArray {
 
     /** 按固定比例裁出区域，缩放到模板尺寸后做 NCC */
     private fun matchRegion(name: String, bmp: Bitmap, g: Rect): Float {
-        val t = regionTemplates()[name] ?: return -1f
         val r = regionRects[name] ?: return -1f
+        // 支持同一区域的多个分辨率模板：improve / improve_720 取最高分
+        val candidates = regionTemplates().entries.filter { it.key == name || it.key.startsWith(name + "_") }
+        if (candidates.isEmpty()) return -1f
         val x0 = g.left + (r[0] * g.width()).toInt()
         val y0 = g.top + (r[1] * g.height()).toInt()
         val x1 = g.left + (r[2] * g.width()).toInt()
@@ -1795,18 +1829,48 @@ private fun coord(name: String, def: FloatArray): FloatArray {
         if (y + h > bmp.height) h = bmp.height - y
         if (w < 6 || h < 6) return -1f
         val roi = Bitmap.createBitmap(bmp, x, y, w, h)
-        val scaled = if (w == t.bmp.width && h == t.bmp.height) roi
-        else Bitmap.createScaledBitmap(roi, t.bmp.width, t.bmp.height, true)
-        if (scaled !== roi) roi.recycle()
-        val px = IntArray(t.bmp.width * t.bmp.height)
-        scaled.getPixels(px, 0, t.bmp.width, 0, 0, t.bmp.width, t.bmp.height)
-        scaled.recycle()
+        var best = -1f
+        for ((key, t) in candidates) {
+            val s = scoreRoi(roi, t, key)
+            if (s > best) best = s
+        }
+        roi.recycle()
+        return best
+    }
+
+    /** 画面 ROI 与单个模板做 NCC；小屏时把模板缩到 ROI 尺寸，避免放大画面导致细节丢失 */
+    private fun scoreRoi(roi: Bitmap, t: RegionTpl, key: String): Float {
+        val w = roi.width
+        val h = roi.height
+        // 小分辨率下不要把画面放大：取画面和模板里较小的尺寸做 1:1 比对，避免细节被抹平
+        val useW = minOf(w, t.bmp.width).coerceAtLeast(6)
+        val useH = minOf(h, t.bmp.height).coerceAtLeast(6)
+        val roiScaled = if (w == useW && h == useH) roi
+        else Bitmap.createScaledBitmap(roi, useW, useH, true)
+        val px = IntArray(useW * useH)
+        roiScaled.getPixels(px, 0, useW, 0, 0, useW, useH)
+        if (roiScaled !== roi) roiScaled.recycle()
         val gray = ByteArray(px.size)
         for (i in px.indices) {
             val c = px[i]
             gray[i] = ((c shr 16 and 0xFF) * 0.299f + (c shr 8 and 0xFF) * 0.587f + (c and 0xFF) * 0.114f).toInt().toByte()
         }
-        return nccScore(gray, t.gray, t.bmp.width, t.bmp.height, 3)
+        val cacheKey = key + "@" + useW + "x" + useH
+        val tgray = regionGrayCache[cacheKey] ?: run {
+            val tplScaled = if (t.bmp.width == useW && t.bmp.height == useH) t.bmp
+            else Bitmap.createScaledBitmap(t.bmp, useW, useH, true)
+            val tpx = IntArray(useW * useH)
+            tplScaled.getPixels(tpx, 0, useW, 0, 0, useW, useH)
+            if (tplScaled !== t.bmp) tplScaled.recycle()
+            val g = ByteArray(tpx.size)
+            for (i in tpx.indices) {
+                val c = tpx[i]
+                g[i] = ((c shr 16 and 0xFF) * 0.299f + (c shr 8 and 0xFF) * 0.587f + (c and 0xFF) * 0.114f).toInt().toByte()
+            }
+            regionGrayCache[cacheKey] = g
+            g
+        }
+        return nccScore(gray, tgray, useW, useH, 3)
     }
 
     /** 主城名模板匹配：名字框相对游戏区固定，按比例裁出后和模板做 NCC */
@@ -2410,8 +2474,8 @@ private fun coord(name: String, def: FloatArray): FloatArray {
         val coarseBest = matchTemplate(
             coarseGray, coarseColors, cw2, ch2,
             tpl.first, tpl.second, tpl.third,
-            // 320 宽缩略图里绿叉约 20px，对应倍率就是 1.0；原来 0.35 起的尺度只会匹配到噪声
-            cw2 / 1280f, listOf(0.8f, 0.9f, 1.0f, 1.1f, 1.2f), 2,
+            // 绿叉实际尺寸约为模板的 0.5~0.7 倍，尺度必须覆盖到 0.4，否则会漏检
+            cw2 / 1280f, listOf(0.4f, 0.5f, 0.6f, 0.7f, 0.8f, 0.9f, 1.0f, 1.1f, 1.2f), 2,
             0, 0, cw2 - 1, ch2 - 1, 0.45f, coarseHits
         )
         logLine("greenx coarse " + (System.currentTimeMillis() - tCoarse) + "ms hits=" + coarseHits.size + " best=" + java.lang.String.format("%.3f", coarseBest))
@@ -2432,40 +2496,46 @@ private fun coord(name: String, def: FloatArray): FloatArray {
             if (!dup) seeds.add(h)
         }
 
-        val targetW = 1280
-        val f = if (bandW > targetW) targetW.toFloat() / bandW else 1f
-        val sw = (bandW * f).toInt()
-        val sh = (bandH * f).toInt()
-        val scaled = Bitmap.createScaledBitmap(band, sw, sh, true)
-        if (band !== bmp) band.recycle()
-        val gray = FloatArray(sw * sh)
-        val colors = IntArray(sw * sh)
-        for (y in 0 until sh) {
-            for (x in 0 until sw) {
-                val c = scaled.getPixel(x, y)
-                colors[y * sw + x] = c
-                gray[y * sw + x] = 0.299f * ((c shr 16) and 0xFF) + 0.587f * ((c shr 8) and 0xFF) + 0.114f * (c and 0xFF)
-            }
-        }
-        scaled.recycle()
-        val base = sw / bandW.toFloat()
-        val tplFineW = (tpl.first * (sw / 1280f)).toInt().coerceAtLeast(8)
-        // 粗扫→精扫是固定 4 倍映射，误差只有几个像素；原来按模板宽度取半径会放大到 ~57px，白扫很多位置
-        val radius = maxOf(20, tplFineW / 4)
+        // 精扫不再把整条画面缩到 1280：围绕粗扫候选裁一小块原图做匹配。
+        // 模板保持真实尺寸(~78px)，倍率恒定在 1.0 附近，不会因 0.53 倍率丢细节而误报。
         val fineHits = mutableListOf<GreenXCand>()
         var fineBest = 0f
         val tFine = System.currentTimeMillis()
+        val coarseToFine = 1f / coarseScale
+        val fineScales = listOf(0.85f, 0.95f, 1.05f, 1.15f)
+        val pad = maxOf(24, (bandW / 320f * 3f).toInt())
+        val winSize = (tpl.first * fineScales.maxOrNull()!!).toInt() + pad * 2
         for (seed in seeds) {
-            val fx = (seed.cx * f / coarseScale).toInt()
-            val fy = (seed.cy * f / coarseScale).toInt()
+            val fx = (seed.cx * coarseToFine).toInt()
+            val fy = (seed.cy * coarseToFine).toInt()
+            val wx = (fx - winSize / 2).coerceIn(0, maxOf(0, bandW - winSize))
+            val wy = (fy - winSize / 2).coerceIn(0, maxOf(0, bandH - winSize))
+            val ww = minOf(winSize, bandW - wx)
+            val wh = minOf(winSize, bandH - wy)
+            if (ww < tpl.first || wh < tpl.second) continue
+            val win = Bitmap.createBitmap(band, wx, wy, ww, wh)
+            val wColors = IntArray(ww * wh)
+            win.getPixels(wColors, 0, ww, 0, 0, ww, wh)
+            win.recycle()
+            val wGray = FloatArray(ww * wh)
+            for (i in wColors.indices) {
+                val c = wColors[i]
+                wGray[i] = 0.299f * ((c shr 16) and 0xFF) + 0.587f * ((c shr 8) and 0xFF) + 0.114f * (c and 0xFF)
+            }
+            val before = fineHits.size
             val s = matchTemplate(
-                gray, colors, sw, sh,
+                wGray, wColors, ww, wh,
                 tpl.first, tpl.second, tpl.third,
-                sw / 1280f, listOf(0.85f, 0.9f, 0.95f, 1f, 1.05f, 1.1f, 1.15f), 3,
-                fx - radius, fy - radius, fx + radius, fy + radius, 0.70f, fineHits
+                1.0f, fineScales, 3,
+                0, 0, ww - 1, wh - 1, 0.70f, fineHits
             )
+            for (i in before until fineHits.size) {
+                val h = fineHits[i]
+                fineHits[i] = GreenXCand(h.cx + wx, h.cy + wy, h.score, h.size, h.whiteRatio)
+            }
             if (s > fineBest) fineBest = s
         }
+        if (band !== bmp) band.recycle()
         logLine("greenx fine " + (System.currentTimeMillis() - tFine) + "ms seeds=" + seeds.size + " hits=" + fineHits.size)
 
         fineHits.sortByDescending { it.score }
@@ -2483,9 +2553,9 @@ private fun coord(name: String, def: FloatArray): FloatArray {
         lastGreenXBest = maxOf(fineBest, coarseBest)
         val result = mutableListOf<Pair<Int, Int>>()
         for (c in kept) {
-            val px = (c.cx / f).toInt() + g.left
-            val py = (c.cy / f).toInt() + bandTop
-            val ratio = greenRatio(bmp, px, py, ((c.size / f) / 2).toInt().coerceAtLeast(10))
+            val px = c.cx + g.left
+            val py = c.cy + bandTop
+            val ratio = greenRatio(bmp, px, py, (c.size / 2).coerceAtLeast(10))
             logLine("绿叉候选 ($px,$py) score=" + java.lang.String.format("%.3f", c.score) + " green=" + java.lang.String.format("%.2f", ratio) + " white=" + java.lang.String.format("%.2f", c.whiteRatio))
             if (c.score <= 1.0f && ratio >= 0.05f && c.whiteRatio <= 0.5f) result.add(px to py)
         }
@@ -2706,6 +2776,8 @@ private fun coord(name: String, def: FloatArray): FloatArray {
     }
     private fun testTap(p: FloatArray) {
         val (x, y) = abs(p)
+        val dm = resources.displayMetrics
+        logLine("测试: p=(${p[0]},${p[1]}) dm=${dm.widthPixels}x${dm.heightPixels} input=${inputW}x${inputH} -> ($x,$y)")
         setStatus("点击坐标: ($x,$y)")
         showGestureDot(x, y)
         handler.postDelayed({ hideGestureDot() }, 1400)

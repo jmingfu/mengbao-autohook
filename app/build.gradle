@@ -6,6 +6,13 @@ plugins {
 android {
     namespace 'com.jmf.autohook'
     compileSdk 34
+    // Android 7.x 对纯 v2/v3 签名的兼容性差，强制同时打 v1(JAR) 签名
+    signingConfigs {
+        debug {
+            v1SigningEnabled true
+            v2SigningEnabled true
+        }
+    }
     // 打包命名：梦宝回挂防狗+版本号
     applicationVariants.all { variant ->
         variant.outputs.all { output ->
