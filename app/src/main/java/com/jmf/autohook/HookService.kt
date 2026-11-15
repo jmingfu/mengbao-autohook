@@ -82,13 +82,9 @@ class HookService : AccessibilityService() {
         "improve_720" to floatArrayOf(1087f / 2400f, 12f / 1080f, 1265f / 2400f, 77f / 1080f),
         "popup" to floatArrayOf(840f / 2400f, 420f / 1080f, 1575f / 2400f, 513f / 1080f),
         "popup_720" to floatArrayOf(840f / 2400f, 420f / 1080f, 1575f / 2400f, 513f / 1080f),
-        "lian" to floatArrayOf(2055f / 2400f, 925f / 1080f, 2125f / 2400f, 980f / 1080f),
-        "gong" to floatArrayOf(1150f / 1280f, 610f / 720f, 1268f / 1280f, 680f / 720f),
-        "gong_720" to floatArrayOf(1150f / 1280f, 610f / 720f, 1268f / 1280f, 680f / 720f),
-        "teji" to floatArrayOf(1150f / 1280f, 540f / 720f, 1268f / 1280f, 615f / 720f),
-        "teji_720" to floatArrayOf(1150f / 1280f, 540f / 720f, 1268f / 1280f, 615f / 720f),
-        "chongji" to floatArrayOf(1150f / 1280f, 450f / 720f, 1268f / 1280f, 545f / 720f),
-        "chongji_720" to floatArrayOf(1150f / 1280f, 450f / 720f, 1268f / 1280f, 545f / 720f),
+        // 战斗判定只看「特技」按钮（圆形木箱图标），720/1080 各自一套位置
+        "teji" to floatArrayOf(2172f / 2400f, 787f / 1080f, 2298f / 2400f, 915f / 1080f),
+        "teji_720" to floatArrayOf(1181f / 1280f, 526f / 720f, 1264f / 1280f, 610f / 720f),
     )
 
     // ===== 坐标配置（比例按真实横屏分辨率 2400x1080 测得）=====
@@ -1029,16 +1025,13 @@ private fun coord(name: String, def: FloatArray): FloatArray {
         val bmp = capture(quiet) ?: return false
         return try {
             val g = ensureGameRect(bmp)
-            val names = listOf("lian", "gong", "teji", "chongji")
-            val scores = names.map { it to matchRegion(it, bmp, g) }
-            val hits = scores.count { it.second >= 0.75f }
+            // 只认「特技」圆形木箱按钮
+            val s = matchRegion("teji", bmp, g)
+            val hit = s >= 0.75f
             if (!quiet) {
-                logLine(
-                    "页面判定: " + scores.joinToString(" ") { it.first + "=" + java.lang.String.format("%.2f", it.second) } +
-                        " -> 命中=$hits 用时 ${System.currentTimeMillis() - t0}ms"
-                )
+                logLine("战斗判定(特技): score=" + java.lang.String.format("%.2f", s) + " -> $hit 用时 ${System.currentTimeMillis() - t0}ms")
             }
-            hits >= 2
+            hit
         } finally {
             bmp.recycle()
         }
@@ -1821,28 +1814,26 @@ private fun coord(name: String, def: FloatArray): FloatArray {
 
     /** 按固定比例裁出区域，缩放到模板尺寸后做 NCC */
     private fun matchRegion(name: String, bmp: Bitmap, g: Rect): Float {
-        val r = regionRects[name] ?: return -1f
-        // 支持同一区域的多个分辨率模板：improve / improve_720 取最高分
+        // 支持同一区域的多个分辨率模板：每个模板用自己的区域比例，取最高分
         val candidates = regionTemplates().entries.filter { it.key == name || it.key.startsWith(name + "_") }
         if (candidates.isEmpty()) return -1f
-        val x0 = g.left + (r[0] * g.width()).toInt()
-        val y0 = g.top + (r[1] * g.height()).toInt()
-        val x1 = g.left + (r[2] * g.width()).toInt()
-        val y1 = g.top + (r[3] * g.height()).toInt()
-        var x = x0.coerceAtLeast(0)
-        var y = y0.coerceAtLeast(0)
-        var w = (x1 - x0).coerceAtLeast(6)
-        var h = (y1 - y0).coerceAtLeast(6)
-        if (x + w > bmp.width) w = bmp.width - x
-        if (y + h > bmp.height) h = bmp.height - y
-        if (w < 6 || h < 6) return -1f
-        val roi = Bitmap.createBitmap(bmp, x, y, w, h)
         var best = -1f
         for ((key, t) in candidates) {
+            val r = regionRects[key] ?: continue
+            var x = g.left + (r[0] * g.width()).toInt()
+            var y = g.top + (r[1] * g.height()).toInt()
+            var w = ((r[2] - r[0]) * g.width()).toInt().coerceAtLeast(6)
+            var h = ((r[3] - r[1]) * g.height()).toInt().coerceAtLeast(6)
+            x = x.coerceAtLeast(0)
+            y = y.coerceAtLeast(0)
+            if (x + w > bmp.width) w = bmp.width - x
+            if (y + h > bmp.height) h = bmp.height - y
+            if (w < 6 || h < 6) continue
+            val roi = Bitmap.createBitmap(bmp, x, y, w, h)
             val s = scoreRoi(roi, t, key)
+            roi.recycle()
             if (s > best) best = s
         }
-        roi.recycle()
         return best
     }
 
