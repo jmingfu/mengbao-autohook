@@ -1023,7 +1023,7 @@ private fun coord(name: String, def: FloatArray): FloatArray {
     /** 战斗页判定：右下角四个标注里至少两个模板命中 */
     private fun isCombatPage(quiet: Boolean = false): Boolean {
         val t0 = System.currentTimeMillis()
-        val bmp = capture() ?: return false
+        val bmp = capture(quiet) ?: return false
         return try {
             val g = ensureGameRect(bmp)
             val names = listOf("lian", "gong", "teji", "chongji")
@@ -1044,7 +1044,7 @@ private fun coord(name: String, def: FloatArray): FloatArray {
     /** 改良页判定：标题「改良」模板 */
     private fun isImproveOpen(quiet: Boolean = false): Boolean {
         val t0 = System.currentTimeMillis()
-        val bmp = capture() ?: return false
+        val bmp = capture(quiet) ?: return false
         return try {
             val g = ensureGameRect(bmp)
             val s = matchRegion("improve", bmp, g)
@@ -1091,10 +1091,13 @@ private fun coord(name: String, def: FloatArray): FloatArray {
     /** 打开改良页：多轮监测，优先等进入战斗后用左上角箭头入口，直到打开成功 */
     private suspend fun openImprovePage(): Boolean {
         var fails = 0
+        var ticks = 0
         val deadline = System.currentTimeMillis() + 90_000
         while (System.currentTimeMillis() < deadline) {
+            ticks++
             // 没战斗就等，检测到战斗才点击
-            if (!isCombatPage(quiet = true)) {
+            val verbose = ticks % 8 == 0
+            if (!isCombatPage(quiet = !verbose)) {
                 delay(300)
                 continue
             }
@@ -1980,17 +1983,17 @@ private fun coord(name: String, def: FloatArray): FloatArray {
     private fun stamp(): String =
         java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.US).format(java.util.Date())
 
-    private fun capture(): Bitmap? {
+    private fun capture(quiet: Boolean = false): Bitmap? {
         val t0 = System.currentTimeMillis()
         val img = imageReader?.acquireLatestImage()
         if (img == null) {
             val cached = lastFrame
             val dt = System.currentTimeMillis() - t0
             if (cached == null) {
-                logLine("截图: 无帧且无缓存 ${dt}ms @${stamp()}")
+                if (!quiet) logLine("截图: 无帧且无缓存 ${dt}ms @${stamp()}")
                 return null
             }
-            logLine("截图: 无新帧，复用缓存 ${dt}ms @${stamp()}")
+            if (!quiet) logLine("截图: 无新帧，复用缓存 ${dt}ms @${stamp()}")
             return cached.copy(Bitmap.Config.ARGB_8888, false)
         }
         return try {
@@ -2013,7 +2016,7 @@ private fun coord(name: String, def: FloatArray): FloatArray {
                 lastFrame?.recycle()
                 lastFrame = frame.copy(Bitmap.Config.ARGB_8888, true)
             }
-            logLine("截图: ${frame.width}x${frame.height} 用时 ${System.currentTimeMillis() - t0}ms @${stamp()}")
+            if (!quiet) logLine("截图: ${frame.width}x${frame.height} 用时 ${System.currentTimeMillis() - t0}ms @${stamp()}")
             frame
         } finally {
             img.close()
