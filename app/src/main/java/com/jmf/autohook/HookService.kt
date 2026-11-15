@@ -83,8 +83,8 @@ class HookService : AccessibilityService() {
         "popup" to floatArrayOf(840f / 2400f, 420f / 1080f, 1575f / 2400f, 513f / 1080f),
         "popup_720" to floatArrayOf(840f / 2400f, 420f / 1080f, 1575f / 2400f, 513f / 1080f),
         // 战斗判定只看「特技」按钮（圆形木箱图标），720/1080 各自一套位置
-        "teji" to floatArrayOf(2172f / 2400f, 787f / 1080f, 2298f / 2400f, 915f / 1080f),
-        "teji_720" to floatArrayOf(1181f / 1280f, 526f / 720f, 1264f / 1280f, 610f / 720f),
+        "teji" to floatArrayOf(2176f / 2400f, 792f / 1080f, 2306f / 2400f, 922f / 1080f),
+        "teji_720" to floatArrayOf(1186f / 1280f, 531f / 720f, 1272f / 1280f, 617f / 720f),
     )
 
     // ===== 坐标配置（比例按真实横屏分辨率 2400x1080 测得）=====
@@ -1747,7 +1747,11 @@ private fun coord(name: String, def: FloatArray): FloatArray {
     }
 
     /** 零均值归一化互相关，radius 为像素级平移搜索范围 */
-    private fun nccScore(img: ByteArray, tpl: ByteArray, w: Int, h: Int, radius: Int): Float {
+    private fun nccScore(img: ByteArray, tpl: ByteArray, w: Int, h: Int, radius: Int, circular: Boolean = false): Float {
+        val ccx = w / 2f
+        val ccy = h / 2f
+        val rr = minOf(w, h) / 2f - 1f
+        val r2 = rr * rr
         var best = -1f
         for (dy in -radius..radius) {
             for (dx in -radius..radius) {
@@ -1764,7 +1768,10 @@ private fun coord(name: String, def: FloatArray): FloatArray {
                         var x = 0
                         while (x < w) {
                             val sx = x + dx
-                            if (sx in 0 until w) {
+                            val vx = x + 0.5f - ccx
+                            val vy = y + 0.5f - ccy
+                            val inCircle = !circular || vx * vx + vy * vy <= r2
+                            if (sx in 0 until w && inCircle) {
                                 val iv = (img[srow + sx].toInt() and 0xFF).toFloat()
                                 val tv = (tpl[trow + x].toInt() and 0xFF).toFloat()
                                 n++
@@ -1869,7 +1876,8 @@ private fun coord(name: String, def: FloatArray): FloatArray {
             regionGrayCache[cacheKey] = g
             g
         }
-        return nccScore(gray, tgray, useW, useH, 3)
+        // 特技按钮按圆形比对（像绿叉一样，忽略四角背景）
+        return nccScore(gray, tgray, useW, useH, 3, key.startsWith("teji"))
     }
 
     /** 主城名模板匹配：名字框相对游戏区固定，按比例裁出后和模板做 NCC */
