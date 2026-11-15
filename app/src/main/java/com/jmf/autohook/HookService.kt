@@ -1281,6 +1281,8 @@ private fun coord(name: String, def: FloatArray): FloatArray {
     }
     /** 一次完整的清理尝试：开改良 → 修理 → 分解 → 关改良 */
     private suspend fun runImproveOnce(): Boolean {
+        // 进入改良前先做弹窗/绿叉校验，避免带弹窗去点箭头或改良
+        closeAllGreenX()
         val opened = if (role == "队长") {
             // 队长：校验失败就继续点右下角改良重试（最多 8 次，每次间隔 2 秒）
             var ok = isImproveOpen()
@@ -2705,7 +2707,9 @@ private fun coord(name: String, def: FloatArray): FloatArray {
             delay(3000)
         }
         delay(5000)
-        // 不再写死某个关闭叉位置，统一走绿叉检测，支持多个弹窗
+        // 点完 5 次来吉虾后，先点右上角关闭叉关掉区域地图，再点挂机
+        tap(coord("regionCloseBtn", regionCloseBtn)); delay(3000)
+        // 兜底清掉其他绿叉弹窗
         closeAllGreenX()
         delay(3000)
         tap(coord("hookBtn", hookBtn)); delay(3000)
