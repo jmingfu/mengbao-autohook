@@ -1160,6 +1160,10 @@ private fun coord(name: String, def: FloatArray): FloatArray {
     private suspend fun repairEquipment(): Boolean {
         setStatus("清理背包：修理装备")
         if (hasForeignPopup()) { logLine("修理前发现弹框"); return false }
+        // 进入改良页、点「装备修理」页签之前：从页签位置向右匀速拖 70% 屏幕宽，持续 5 秒
+        val repairTab = coord("improveRepairTab", coordDefaults["improveRepairTab"]!!)
+        swipeWithDuration(repairTab, floatArrayOf(minOf(repairTab[0] + 0.70f, 0.98f), repairTab[1]), 5000)
+        delay(2000)
         tap(coord("improveRepairTab", coordDefaults["improveRepairTab"]!!)); delay(3000)
         if (hasForeignPopup()) { logLine("修理：点全身修理前发现弹框"); return false }
         tap(coord("improveFullRepair", coordDefaults["improveFullRepair"]!!)); delay(3000)
@@ -2874,6 +2878,44 @@ private fun coord(name: String, def: FloatArray): FloatArray {
     }
 
     private var debugDot: android.view.View? = null
+
+    /** 直线匀速滑动，可指定时长（轨迹圆点按时长均匀分布） */
+    private fun swipeWithDuration(from: FloatArray, to: FloatArray, durationMs: Long) {
+        if (!running) return
+        val (x1, y1) = abs(from)
+        val (x2, y2) = abs(to)
+        if (x1 == x2 && y1 == y2) return
+        setStatus("滑动 ($x1,$y1)->($x2,$y2) ${durationMs}ms")
+        val steps = 30
+        scope.launch {
+            val stepDelay = (durationMs / steps).coerceAtLeast(16L)
+            for (i in 0..steps) {
+                showGestureDot(x1 + (x2 - x1) * i / steps, y1 + (y2 - y1) * i / steps)
+                delay(stepDelay)
+            }
+            handler.postDelayed({ hideGestureDot() }, 900)
+        }
+        val path = android.graphics.Path().apply {
+            moveTo(x1.toFloat(), y1.toFloat())
+            lineTo(x2.toFloat(), y2.toFloat())
+        }
+        val stroke = GestureDescription.StrokeDescription(path, 0, durationMs)
+        logLine("swipe ${durationMs}ms ($x1,$y1 -> $x2,$y2)")
+        handler.post {
+            val cb = object : AccessibilityService.GestureResultCallback() {
+                override fun onCompleted(g: GestureDescription?) {
+                    logLine("swipe 完成")
+                    setStatus("滑动: 完成")
+                }
+                override fun onCancelled(g: GestureDescription?) {
+                    logErr("swipe 被取消/未执行 ($x1,$y1 -> $x2,$y2)")
+                    setStatus("滑动: 失败($x1,$y1)->($x2,$y2)")
+                }
+            }
+            instance?.dispatchGesture(GestureDescription.Builder().addStroke(stroke).build(), cb, handler)
+        }
+    }
+
     private fun showGestureDot(x: Int, y: Int) {
         handler.post {
             try {
