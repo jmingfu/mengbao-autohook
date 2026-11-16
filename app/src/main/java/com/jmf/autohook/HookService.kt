@@ -536,6 +536,9 @@ private fun coord(name: String, def: FloatArray): FloatArray {
                 logErr("悬浮窗权限未授予，无法显示图标")
                 return@post
             }
+            // 先移除旧图标，避免重复启动监测时叠加多个小图标
+            iconView?.let { try { wm.removeView(it) } catch (_: Exception) {} }
+            iconView = null
             val icon = android.widget.ImageView(this).apply {
                 setImageResource(android.R.drawable.ic_menu_manage)
                 setBackgroundColor(0xE6FF1744L.toInt())
@@ -713,9 +716,11 @@ private fun coord(name: String, def: FloatArray): FloatArray {
                     return v
                 }
             }
+            var mapReady = false
             spMap.setSelection(maps.indexOf(selectedAfkProfile(prefs).label), false)
             spMap.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
                 override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: android.view.View?, position: Int, id: Long) {
+                    if (!mapReady) return
                     val label = maps[position]
                     if (label != selectedAfkProfile(prefs).label) {
                         prefs.edit().putString("afkProfile", label).apply()
@@ -726,6 +731,7 @@ private fun coord(name: String, def: FloatArray): FloatArray {
                 }
                 override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
             }
+            spMap.postDelayed({ mapReady = true }, 500)
             val btnChores = bigButton("跑日常")
             btnChores.layoutParams = android.widget.LinearLayout.LayoutParams(
                 android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -3111,6 +3117,7 @@ private fun coord(name: String, def: FloatArray): FloatArray {
     override fun onDestroy() {
         running = false
         iconView?.let { (getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager).removeView(it) }
+        iconView = null
         panelView?.let { (getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager).removeView(it) }
         logScroll?.let { (getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager).removeView(it) }
         logScroll = null

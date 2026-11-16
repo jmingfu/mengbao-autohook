@@ -22,6 +22,8 @@ import androidx.core.content.ContextCompat
 class MainActivity : AppCompatActivity() {
     private val projectionRequest = 100
     private val notificationRequest = 101
+    // 下拉框初始化/程序化设置时，忽略 onItemSelected 回调，避免把已选地图写回默认值
+    private var suppressAfkWrite = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -65,17 +67,17 @@ class MainActivity : AppCompatActivity() {
         val afkMaps = HookService.afkProfiles().map { it.label }
         spAfk.adapter = android.widget.ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, afkMaps)
         val savedAfk = prefs.getString("afkProfile", null)
-        if (savedAfk != null && afkMaps.indexOf(savedAfk) >= 0) {
-            spAfk.setSelection(afkMaps.indexOf(savedAfk), false)
-        } else {
-            spAfk.setSelection(0, false)
-        }
+        val afkIndex = if (savedAfk != null && afkMaps.indexOf(savedAfk) >= 0) afkMaps.indexOf(savedAfk) else 0
+        suppressAfkWrite = true
+        spAfk.setSelection(afkIndex, false)
         spAfk.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: android.view.View?, position: Int, id: Long) {
+                if (suppressAfkWrite) return
                 prefs.edit().putString("afkProfile", afkMaps[position]).apply()
             }
             override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
         }
+        spAfk.postDelayed({ suppressAfkWrite = false }, 500)
 
         // 截屏分辨率选择（默认 720*1280）
         val spCapture = findViewById<android.widget.Spinner>(R.id.spCapture)
@@ -125,6 +127,16 @@ class MainActivity : AppCompatActivity() {
         val roles = listOf("队长", "队员")
         if (roles.indexOf(savedRole) >= 0 && spRole.selectedItemPosition != roles.indexOf(savedRole)) {
             spRole.setSelection(roles.indexOf(savedRole), false)
+        }
+        // 面板里改过地图后，回到主页同步显示（不写回配置）
+        val spAfk = findViewById<android.widget.Spinner>(R.id.spAfkMap)
+        val afkMaps = HookService.afkProfiles().map { it.label }
+        val savedAfk = prefs.getString("afkProfile", null)
+        val afkIndex = if (savedAfk != null) afkMaps.indexOf(savedAfk) else -1
+        if (afkIndex >= 0 && spAfk.selectedItemPosition != afkIndex) {
+            suppressAfkWrite = true
+            spAfk.setSelection(afkIndex, false)
+            spAfk.postDelayed({ suppressAfkWrite = false }, 500)
         }
         if (HookService.running) {
             btnProjection.text = "结束监测"
