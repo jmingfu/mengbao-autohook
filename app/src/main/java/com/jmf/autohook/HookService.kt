@@ -1431,6 +1431,18 @@ private fun coord(name: String, def: FloatArray): FloatArray {
         setStatus(if (cleaned) "日常完成" else "日常失败")
         return cleaned
     }
+
+    /** 队长脱战监测：独立流程，分解改良结束后执行；不在战斗才点挂机按钮 */
+    private suspend fun captainLeaveCombatCheck(stage: String) {
+        if (!running || role != "队长") return
+        closeAllGreenX()
+        if (!isCombatPage()) {
+            logLine("$stage 脱战监测：已脱战，点挂机按钮")
+            tap(coord("hookBtn", hookBtn)); delay(3000)
+        } else {
+            logLine("$stage 脱战监测：仍在战斗，跳过点击")
+        }
+    }
     private var calibView: android.view.View? = null
     @Volatile private var lastDailyStatus = "未执行"
 
@@ -1655,6 +1667,7 @@ private fun coord(name: String, def: FloatArray): FloatArray {
                     lastDailyStatus = "未启用"
                 }
             }
+            captainLeaveCombatCheck("启动流程")
             while (running) {
                 try {
                     val buyGap = prefs.getInt("intervalBuy", 60).coerceAtLeast(1) * 60_000L
@@ -1686,6 +1699,7 @@ private fun coord(name: String, def: FloatArray): FloatArray {
                             setStatus("日常异常：" + e.message)
                         }
                     }
+                    captainLeaveCombatCheck("循环")
                 } catch (e: Exception) {
                     logErr("loop error", e)
                 }
@@ -2693,7 +2707,12 @@ private fun coord(name: String, def: FloatArray): FloatArray {
         val game = currentGameRect
         tap(coord("mapNameBox", mapNameBox)); delay(3000)
         tap(coord("worldBtn", worldBtn)); delay(3000)
-        swipe(coord("swipeFrom", swipeFrom), coord("swipeTo", swipeTo)); delay(3000)
+        // 大地图滑动：仅幽暗森林/分歧岭/乱石岗/忘尘湖/合流之地取消，其余地图保留
+        val noSwipe = selectedAfkProfile(getSharedPreferences("cfg", MODE_PRIVATE)) in
+            setOf(AfkProfile.YOUAN, AfkProfile.FENQILING, AfkProfile.LUANSHIGANG, AfkProfile.WANGCHENHU, AfkProfile.HELIUZHIDI)
+        if (!noSwipe) {
+            swipe(coord("swipeFrom", swipeFrom), coord("swipeTo", swipeTo)); delay(3000)
+        }
         tap(coord("icon", chaosIcon)); delay(3000)
         tap(coord("teleport", chaosTeleport)); delay(4500)
         if (role == "队员") {
