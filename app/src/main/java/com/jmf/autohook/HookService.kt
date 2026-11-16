@@ -73,8 +73,9 @@ class HookService : AccessibilityService() {
     private val homeRects = mapOf(
         "digebao" to floatArrayOf(187f / 2400f, 4f / 1080f, 370f / 2400f, 47f / 1080f),
         "ziyouzhidu" to floatArrayOf(187f / 2400f, 4f / 1080f, 370f / 2400f, 47f / 1080f),
-        "digebao_720" to floatArrayOf(64f / 1280f, 2f / 720f, 190f / 1280f, 41f / 720f),
-        "ziyouzhidu_720" to floatArrayOf(64f / 1280f, 2f / 720f, 190f / 1280f, 41f / 720f),
+        // 按用户新裁的 720 模板（贴字裁切）对齐：迪戈堡 84x28、自由之都 109x28
+        "digebao_720" to floatArrayOf(75f / 1280f, 7f / 720f, 155f / 1280f, 38f / 720f),
+        "ziyouzhidu_720" to floatArrayOf(75f / 1280f, 7f / 720f, 180f / 1280f, 38f / 720f),
     )
     private val homeScaledCache = HashMap<String, ByteArray>()
     private var gameRectKey: String? = null
@@ -1169,7 +1170,8 @@ private fun coord(name: String, def: FloatArray): FloatArray {
         // 进入改良页、点「装备修理」页签之前：从页签位置向右匀速拖 70% 屏幕宽，持续 5 秒
         val repairTab = coord("improveRepairTab", coordDefaults["improveRepairTab"]!!)
         swipeWithDuration(repairTab, floatArrayOf(minOf(repairTab[0] + 0.70f, 0.98f), repairTab[1]), 5000)
-        delay(2000)
+        // 必须等 5 秒手势完整结束再点，否则点击会被系统丢弃
+        delay(5200)
         tap(coord("improveRepairTab", coordDefaults["improveRepairTab"]!!)); delay(3000)
         if (hasForeignPopup()) { logLine("修理：点全身修理前发现弹框"); return false }
         tap(coord("improveFullRepair", coordDefaults["improveFullRepair"]!!)); delay(3000)
