@@ -2201,7 +2201,10 @@ private fun coord(name: String, def: FloatArray): FloatArray {
             val h = leInt(header, 4)
             val fmt = leInt(header, 8)
             // 1 = RGBA_8888，4 = RGBX_8888；其他格式放弃，交给录屏通道
-            if (w !in 16..8192 || h !in 16..8192 || (fmt != 1 && fmt != 4)) {
+            // 同时限制像素总量，避免头信息异常时按超大尺寸分配内存导致 OOM 闪退
+            if (w !in 16..8192 || h !in 16..8192 || (fmt != 1 && fmt != 4) ||
+                w.toLong() * h.toLong() > 4_000_000L
+            ) {
                 logLine("root 截图格式不支持 w=$w h=$h fmt=$fmt")
                 return null
             }

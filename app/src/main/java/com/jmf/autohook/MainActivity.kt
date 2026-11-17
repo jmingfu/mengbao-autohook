@@ -118,8 +118,6 @@ class MainActivity : AppCompatActivity() {
             askProjection()
         }
         findViewById<Button>(R.id.btnStop).visibility = View.GONE
-        // 预热 root 探测：有 root 时点开始监测不再弹录屏授权
-        probeRoot { }
     }
 
     override fun onResume() {
@@ -192,7 +190,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** 探测一次 root（su -c id），结果缓存；回调一定在主线程 */
+    /** 探测一次 root（su -c id）；授权弹窗 10 秒自动拒绝，所以最多等 10.5 秒；回调一定在主线程 */
     private fun probeRoot(onResult: (Boolean) -> Unit) {
         if (rootProbeDone) {
             onResult(rootAvailable)
@@ -201,8 +199,18 @@ class MainActivity : AppCompatActivity() {
         Thread {
             val ok = try {
                 val p = ProcessBuilder("su", "-c", "id").redirectErrorStream(true).start()
-                // su 弹窗没点的话会一直挂住，最多等 2.5 秒
-                val finished = p.waitFor(2500, java.util.concurrent.TimeUnit.MILLISECONDS)
+                // 不能用 waitFor(超时)：那是 API 26+ 才有的方法，Android 7 上会 NoSuchMethodError
+                val deadline = System.currentTimeMillis() + 10_500
+                var finished = false
+                while (System.currentTimeMillis() < deadline) {
+                    try {
+                        p.exitValue()
+                        finished = true
+                        break
+                    } catch (_: IllegalThreadStateException) {
+                        Thread.sleep(50)
+                    }
+                }
                 val out = if (finished) p.inputStream.bufferedReader().readText() else ""
                 if (!finished) p.destroy()
                 out.contains("uid=0")
@@ -210,7 +218,8 @@ class MainActivity : AppCompatActivity() {
                 false
             }
             rootAvailable = ok
-            rootProbeDone = true
+            // 只缓存成功：失败（含授权超时被自动拒绝）就等下次点击再给一次机会
+            rootProbeDone = ok
             runOnUiThread { onResult(ok) }
         }.apply { isDaemon = true }.start()
     }
