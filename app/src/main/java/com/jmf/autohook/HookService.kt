@@ -16,12 +16,16 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 import kotlin.math.roundToInt
 
 class HookService : AccessibilityService() {
@@ -49,6 +53,8 @@ class HookService : AccessibilityService() {
         running = false
         monitorJob?.cancel()
         monitorJob = null
+        lastName = null
+        lastNameHash = 0
         setStatus("监测已结束")
         hideRunningHint()
         refreshLogWindow()
@@ -65,6 +71,7 @@ class HookService : AccessibilityService() {
     private var screenH = 0
     private var inputW = 0
     private var inputH = 0
+    private val recognizer by lazy { TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build()) }
 
     // ===== 主城识别（模板优先，懒加载） =====
     private data class HomeTpl(val label: String, val bmp: Bitmap, val gray: ByteArray, val mean: Float, val std: Float)
@@ -1167,11 +1174,11 @@ private fun coord(name: String, def: FloatArray): FloatArray {
     private suspend fun repairEquipment(): Boolean {
         setStatus("清理背包：修理装备")
         if (hasForeignPopup()) { logLine("修理前发现弹框"); return false }
-        // 进入改良页、点「装备修理」页签之前：从页签位置向右匀速拖 70% 屏幕宽，持续 5 秒
+        // 进入改良页、点「装备修理」页签之前：从页签位置向右匀速拖 70% 屏幕宽，持续 3 秒
         val repairTab = coord("improveRepairTab", coordDefaults["improveRepairTab"]!!)
-        swipeWithDuration(repairTab, floatArrayOf(minOf(repairTab[0] + 0.70f, 0.98f), repairTab[1]), 5000)
-        // 必须等 5 秒手势完整结束再点，否则点击会被系统丢弃
-        delay(5200)
+        swipeWithDuration(repairTab, floatArrayOf(minOf(repairTab[0] + 0.70f, 0.98f), repairTab[1]), 3000)
+        // 必须等 3 秒手势完整结束（含回弹）再点，否则点击会被系统丢弃
+        delay(6000)
         tap(coord("improveRepairTab", coordDefaults["improveRepairTab"]!!)); delay(3000)
         if (hasForeignPopup()) { logLine("修理：点全身修理前发现弹框"); return false }
         tap(coord("improveFullRepair", coordDefaults["improveFullRepair"]!!)); delay(3000)
@@ -1647,9 +1654,9 @@ private fun coord(name: String, def: FloatArray): FloatArray {
                 }
                 if (running) {
                     closeAllGreenX()
-                    val startHome = isHomeScreen()
-                    if (startHome) {
-                        setStatus("监测到主城")
+                    val startMap = readMapName()
+                    if (startMap != null && isHomeMap(startMap, homeMaps)) {
+                        setStatus("监测到主城：$startMap")
                         delay(3000)
                         setStatus("启动流程：归位")
                         goBack(afkMap)
@@ -1693,13 +1700,13 @@ private fun coord(name: String, def: FloatArray): FloatArray {
                         logLine("买药未到期，剩余 $leftMin 分钟")
                     }
                     closeAllGreenX()
-                    val isHome = isHomeScreen()
-                    if (isHome) {
-                        setStatus("识别: 主城｜日常:$lastDailyStatus")
+                    val mapName = readMapName()
+                    if (mapName != null && isHomeMap(mapName, homeMaps)) {
+                        setStatus("识别地图: $mapName（主城）｜日常:$lastDailyStatus")
                         logLine("在主城，开始回挂")
                         goBack(afkMap)
                     } else {
-                        setStatus("识别: 非主城｜日常:$lastDailyStatus")
+                        setStatus("识别地图: ${mapName ?: "未知"}（非主城）｜日常:$lastDailyStatus")
                     }
                     if (prefs.getBoolean("enableDecompose", true) && choresDue(prefs)) {
                         prefs.edit().putLong("lastChoresTry", System.currentTimeMillis()).apply()
@@ -1966,6 +1973,50 @@ private fun coord(name: String, def: FloatArray): FloatArray {
         return currentGameRect
     }
 
+    private suspend fun readMapName(): String? {
+        val bmp = capture() ?: return null
+        val game = gameRect(bmp)
+        currentGameRect = game
+        logLine("画面=${bmp.width}x${bmp.height} 游戏区=$game")
+        // 识别框按原始横屏截图 2192x1080 像素测得
+        val tl = coord("nameCropTL", floatArrayOf(90f / 2192f, 0f))
+        val br = coord("nameCropBR", floatArrayOf(360f / 2192f, 55f / 1080f))
+        var cx = game.left + (tl[0] * game.width()).roundToInt()
+        var cy = game.top + (tl[1] * game.height()).roundToInt()
+        var cw = maxOf(64, ((br[0] - tl[0]) * game.width()).roundToInt())
+        var ch = maxOf(64, ((br[1] - tl[1]) * game.height()).roundToInt())
+        if (cx + cw > bmp.width) cx = bmp.width - cw
+        if (cy + ch > bmp.height) cy = bmp.height - ch
+        val crop = Bitmap.createBitmap(bmp, cx, cy, cw, ch)
+        // 地图名区域没变化就不再跑 OCR（云手机多开时 OCR 是常驻 CPU 开销）
+        var hash = 17
+        var hy = 0
+        while (hy < ch) {
+            var hx = 0
+            while (hx < cw) {
+                hash = hash * 31 + crop.getPixel(hx, hy)
+                hx += 8
+            }
+            hy += 8
+        }
+        val cachedName = lastName
+        if (hash == lastNameHash && cachedName != null) {
+            crop.recycle()
+            bmp.recycle()
+            return cachedName
+        }
+        return try {
+            val res = recognizer.process(InputImage.fromBitmap(crop, 0)).await()
+            val text = res.text.replace(" ", "").replace("\n", "")
+            lastNameHash = hash
+            lastName = text
+            text
+        } finally {
+            crop.recycle()
+            bmp.recycle()
+        }
+    }
+
     /** 主城判定：模板匹配，带分阶段耗时日志 */
     private fun isHomeScreen(): Boolean {
         val t0 = System.currentTimeMillis()
@@ -2016,6 +2067,8 @@ private fun coord(name: String, def: FloatArray): FloatArray {
 
     /** 画面静止时截屏流不产新帧，缓存最近一帧供复用（返回的都是独立副本，可安全 recycle） */
     @Volatile private var lastFrame: Bitmap? = null
+    private var lastNameHash = 0
+    private var lastName: String? = null
 
     private fun stamp(): String =
         java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.US).format(java.util.Date())
@@ -2744,10 +2797,10 @@ private fun coord(name: String, def: FloatArray): FloatArray {
         closeAllGreenX()
         delay(3000)
         tap(coord("hookBtn", hookBtn)); delay(3000)
-        val stillHome = isHomeScreen()
-        logLine("回挂后主城判定: " + if (stillHome) "仍在主城" else "已离开主城")
+        val name = readMapName()
+        logLine("回挂后识别: $name")
         // 归位后不再递归重试，交回主循环按间隔继续截图判断
-        if (!stillHome) {
+        if (name != null && name.contains(afkMap)) {
             setStatus("已回到挂机地图")
         } else {
             setStatus("归位未确认，10秒后继续检查")

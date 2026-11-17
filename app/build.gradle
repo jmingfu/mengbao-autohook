@@ -23,8 +23,8 @@ android {
         applicationId 'com.jmf.autohook'
         minSdk 24
         targetSdk 34
-        versionCode 29
-        versionName '1.0.29c'
+        versionCode 30
+        versionName '1.0.30a'
     }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
@@ -37,4 +37,6 @@ dependencies {
     implementation 'androidx.core:core-ktx:1.13.1'
     implementation 'androidx.appcompat:appcompat:1.7.0'
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.8.1'
+    implementation 'com.google.mlkit:text-recognition-chinese:16.0.1'
 }
