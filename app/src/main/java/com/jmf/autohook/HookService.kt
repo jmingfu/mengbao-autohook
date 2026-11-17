@@ -57,8 +57,23 @@ class HookService : AccessibilityService() {
         lastNameHash = 0
         setStatus("监测已结束")
         hideRunningHint()
+        releaseCapture()
         refreshLogWindow()
         handler.postDelayed({ setLogTouchable(true) }, 400)
+    }
+
+    /** 释放录屏通道（虚拟显示 + ImageReader + MediaProjection），重复调用安全 */
+    private fun releaseCapture(stopProjection: Boolean = true) {
+        try { virtualDisplay?.release() } catch (_: Exception) {}
+        virtualDisplay = null
+        try { imageReader?.close() } catch (_: Exception) {}
+        imageReader = null
+        if (stopProjection) {
+            try { projection?.stop() } catch (_: Exception) {}
+        }
+        projection = null
+        // 不主动 recycle：可能有截图线程正在读同一块缓存，交给 GC 回收更安全
+        lastFrame = null
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -481,11 +496,25 @@ private fun coord(name: String, def: FloatArray): FloatArray {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startAsForeground()
+        // 服务未退出时再次"开始监测"：先释放旧通道，否则每点一次就多一条虚拟显示，CPU 越跑越高
+        if (imageReader != null || virtualDisplay != null || projection != null) {
+            logLine("检测到旧录屏通道，先释放再重建")
+            releaseCapture()
+        }
+        val data = pendingData
+        if (data == null) {
+            logLine("缺少录屏授权，请在 App 内重新开始监测")
+            return START_NOT_STICKY
+        }
         val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-        projection = mpm.getMediaProjection(pendingResultCode, pendingData!!)
+        projection = mpm.getMediaProjection(pendingResultCode, data)
+        pendingData = null
+        pendingResultCode = 0
         projection!!.registerCallback(object : MediaProjection.Callback() {
             override fun onStop() {
+                // 系统收回授权（例如用户停止共享屏幕）：一并释放，避免留下空转的通道
                 running = false
+                releaseCapture(stopProjection = false)
             }
         }, handler)
         val dm = resources.displayMetrics
@@ -675,6 +704,11 @@ private fun coord(name: String, def: FloatArray): FloatArray {
             btnStart.setOnClickListener {
                 if (running) {
                     Companion.stop()
+                } else if (imageReader == null || projection == null) {
+                    android.widget.Toast.makeText(this, "录屏通道已释放，请在 App 内点开始监测", android.widget.Toast.LENGTH_LONG).show()
+                    try {
+                        startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    } catch (_: Exception) {}
                 } else {
                     saveCfgToPrefs()
                     startMonitor()
@@ -1612,6 +1646,10 @@ private fun coord(name: String, def: FloatArray): FloatArray {
     }
     private fun startMonitor() {
         if (running) return
+        if (imageReader == null) {
+            logLine("录屏通道不存在，无法启动监测")
+            return
+        }
         android.widget.Toast.makeText(this, "脚本进行中，请勿操作！", android.widget.Toast.LENGTH_LONG).show()
         showRunningHint()
         running = true
@@ -2075,7 +2113,8 @@ private fun coord(name: String, def: FloatArray): FloatArray {
 
     private fun capture(quiet: Boolean = false): Bitmap? {
         val t0 = System.currentTimeMillis()
-        val img = imageReader?.acquireLatestImage()
+        // 通道被释放时 acquire 会抛异常，这里吞掉按"无新帧"处理
+        val img = try { imageReader?.acquireLatestImage() } catch (_: Exception) { null }
         if (img == null) {
             val cached = lastFrame
             val dt = System.currentTimeMillis() - t0
