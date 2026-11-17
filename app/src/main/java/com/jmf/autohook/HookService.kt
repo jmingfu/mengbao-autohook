@@ -38,7 +38,19 @@ class HookService : AccessibilityService() {
         fun start(context: Context, resultCode: Int, data: Intent) {
             pendingResultCode = resultCode
             pendingData = data
+            context.getSharedPreferences("cfg", Context.MODE_PRIVATE).edit()
+                .putBoolean("useRootCapture", false).apply()
             androidx.core.content.ContextCompat.startForegroundService(context, Intent(context, HookService::class.java))
+        }
+
+        /** root 模式启动：不需要录屏授权数据 */
+        fun startRoot(context: Context) {
+            pendingData = null
+            context.getSharedPreferences("cfg", Context.MODE_PRIVATE).edit()
+                .putBoolean("useRootCapture", true).apply()
+            androidx.core.content.ContextCompat.startForegroundService(
+                context, Intent(context, HookService::class.java).putExtra("useRoot", true)
+            )
         }
 
         fun stop() {
@@ -82,6 +94,8 @@ class HookService : AccessibilityService() {
     private var projection: MediaProjection? = null
     private var virtualDisplay: VirtualDisplay? = null
     private var imageReader: ImageReader? = null
+    // root 截图模式：完全不依赖 MediaProjection
+    @Volatile private var rootOk = false
     private var screenW = 0
     private var screenH = 0
     private var inputW = 0
@@ -502,21 +516,29 @@ private fun coord(name: String, def: FloatArray): FloatArray {
             releaseCapture()
         }
         val data = pendingData
-        if (data == null) {
+        val prefs0 = getSharedPreferences("cfg", Context.MODE_PRIVATE)
+        // root 模式：不申请录屏授权、不建虚拟显示（服务被系统重启时沿用上次模式）
+        val wantRoot = intent?.getBooleanExtra("useRoot", false) == true ||
+            (intent == null && prefs0.getBoolean("useRootCapture", false))
+        rootOk = wantRoot
+        if (wantRoot) logLine("root 截图模式：不申请录屏授权")
+        if (!wantRoot && data == null) {
             logLine("缺少录屏授权，请在 App 内重新开始监测")
             return START_NOT_STICKY
         }
-        val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-        projection = mpm.getMediaProjection(pendingResultCode, data)
-        pendingData = null
-        pendingResultCode = 0
-        projection!!.registerCallback(object : MediaProjection.Callback() {
-            override fun onStop() {
-                // 系统收回授权（例如用户停止共享屏幕）：一并释放，避免留下空转的通道
-                running = false
-                releaseCapture(stopProjection = false)
-            }
-        }, handler)
+        if (!wantRoot) {
+            val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+            projection = mpm.getMediaProjection(pendingResultCode, data!!)
+            pendingData = null
+            pendingResultCode = 0
+            projection!!.registerCallback(object : MediaProjection.Callback() {
+                override fun onStop() {
+                    // 系统收回授权（例如用户停止共享屏幕）：一并释放，避免留下空转的通道
+                    running = false
+                    releaseCapture(stopProjection = false)
+                }
+            }, handler)
+        }
         val dm = resources.displayMetrics
         // 截屏分辨率：主页下拉框设置，默认 720*1280；选"自动"则跟随屏幕横屏尺寸
         val resStr = getSharedPreferences("cfg", Context.MODE_PRIVATE).getString("captureRes", "自动跟随屏幕") ?: "自动跟随屏幕"
@@ -536,11 +558,14 @@ private fun coord(name: String, def: FloatArray): FloatArray {
         inputH = realSize.y
         currentGameRect = Rect(0, 0, screenW, screenH)
         logLine("input=" + inputW + "x" + inputH)
-        imageReader = ImageReader.newInstance(screenW, screenH, PixelFormat.RGBA_8888, 2)
-        virtualDisplay = projection!!.createVirtualDisplay(
-            "hook", screenW, screenH, dm.densityDpi,
-            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, imageReader!!.surface, null, handler
-        )
+        if (!wantRoot) {
+            imageReader = ImageReader.newInstance(screenW, screenH, PixelFormat.RGBA_8888, 2)
+            virtualDisplay = projection!!.createVirtualDisplay(
+                "hook", screenW, screenH, dm.densityDpi,
+                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, imageReader!!.surface, null, handler
+            )
+            logLine("录屏通道已建立 ${screenW}x$screenH")
+        }
         role = getSharedPreferences("cfg", Context.MODE_PRIVATE).getString("role", "队长") ?: "队长"
         showOverlay()
         return START_STICKY
@@ -704,7 +729,7 @@ private fun coord(name: String, def: FloatArray): FloatArray {
             btnStart.setOnClickListener {
                 if (running) {
                     Companion.stop()
-                } else if (imageReader == null || projection == null) {
+                } else if (!rootOk && (imageReader == null || projection == null)) {
                     android.widget.Toast.makeText(this, "录屏通道已释放，请在 App 内点开始监测", android.widget.Toast.LENGTH_LONG).show()
                     try {
                         startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
@@ -1646,7 +1671,7 @@ private fun coord(name: String, def: FloatArray): FloatArray {
     }
     private fun startMonitor() {
         if (running) return
-        if (imageReader == null) {
+        if (!rootOk && imageReader == null) {
             logLine("录屏通道不存在，无法启动监测")
             return
         }
@@ -2112,6 +2137,10 @@ private fun coord(name: String, def: FloatArray): FloatArray {
         java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.US).format(java.util.Date())
 
     private fun capture(quiet: Boolean = false): Bitmap? {
+        if (rootOk) {
+            rootCapture(quiet)?.let { return it }
+            logLine("root 截图失败，回退录屏通道")
+        }
         val t0 = System.currentTimeMillis()
         // 通道被释放时 acquire 会抛异常，这里吞掉按"无新帧"处理
         val img = try { imageReader?.acquireLatestImage() } catch (_: Exception) { null }
@@ -2151,6 +2180,66 @@ private fun coord(name: String, def: FloatArray): FloatArray {
             img.close()
         }
     }
+
+    /** root 模式截图：su 执行 screencap，直接读原始 RGBA（12 字节头 + 像素），不走录屏授权 */
+    private fun rootCapture(quiet: Boolean = false): Bitmap? {
+        val t0 = System.currentTimeMillis()
+        var p: Process? = null
+        try {
+            val proc = ProcessBuilder("su", "-c", "screencap").redirectErrorStream(false).start()
+            p = proc
+            // 看门狗：8 秒还没读完就杀掉，避免 su 卡住把监测拖死
+            val killer = Thread {
+                try { Thread.sleep(8000); proc.destroy() } catch (_: Exception) {}
+            }
+            killer.isDaemon = true
+            killer.start()
+            val ins = java.io.BufferedInputStream(proc.inputStream, 1 shl 20)
+            val header = ByteArray(12)
+            if (!readFully(ins, header)) return null
+            val w = leInt(header, 0)
+            val h = leInt(header, 4)
+            val fmt = leInt(header, 8)
+            // 1 = RGBA_8888，4 = RGBX_8888；其他格式放弃，交给录屏通道
+            if (w !in 16..8192 || h !in 16..8192 || (fmt != 1 && fmt != 4)) {
+                logLine("root 截图格式不支持 w=$w h=$h fmt=$fmt")
+                return null
+            }
+            val buf = ByteArray(w * h * 4)
+            if (!readFully(ins, buf)) return null
+            // root 截图拿到的是真实分辨率，跟配置不一致时以实际为准，避免坐标换算错位
+            if (screenW != w || screenH != h) {
+                logLine("root 截图尺寸 ${w}x$h，更新截屏分辨率（原 ${screenW}x$screenH）")
+                screenW = w
+                screenH = h
+                currentGameRect = Rect(0, 0, w, h)
+            }
+            val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            bmp.copyPixelsFromBuffer(java.nio.ByteBuffer.wrap(buf))
+            killer.interrupt()
+            if (!quiet) logLine("root 截图: ${w}x$h 用时 ${System.currentTimeMillis() - t0}ms")
+            return bmp
+        } catch (e: Exception) {
+            if (!quiet) logLine("root 截图异常: ${e.message}")
+            return null
+        } finally {
+            try { p?.destroy() } catch (_: Exception) {}
+        }
+    }
+
+    private fun readFully(ins: java.io.InputStream, buf: ByteArray): Boolean {
+        var off = 0
+        while (off < buf.size) {
+            val n = ins.read(buf, off, buf.size - off)
+            if (n <= 0) return false
+            off += n
+        }
+        return true
+    }
+
+    private fun leInt(b: ByteArray, off: Int): Int =
+        (b[off].toInt() and 0xFF) or ((b[off + 1].toInt() and 0xFF) shl 8) or
+            ((b[off + 2].toInt() and 0xFF) shl 16) or ((b[off + 3].toInt() and 0xFF) shl 24)
 
     /** 关闭屏幕上所有绿叉弹窗，全部关完才返回 */
     /** 中间弹框区域的画面采样，用于判断点击后画面变化比例 */

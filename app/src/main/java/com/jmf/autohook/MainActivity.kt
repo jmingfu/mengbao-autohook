@@ -24,6 +24,9 @@ class MainActivity : AppCompatActivity() {
     private val notificationRequest = 101
     // 下拉框初始化/程序化设置时，忽略 onItemSelected 回调，避免把已选地图写回默认值
     private var suppressAfkWrite = false
+    // root 探测结果缓存（只探一次）
+    @Volatile private var rootProbeDone = false
+    @Volatile private var rootAvailable = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -115,6 +118,8 @@ class MainActivity : AppCompatActivity() {
             askProjection()
         }
         findViewById<Button>(R.id.btnStop).visibility = View.GONE
+        // 预热 root 探测：有 root 时点开始监测不再弹录屏授权
+        probeRoot { }
     }
 
     override fun onResume() {
@@ -173,8 +178,41 @@ class MainActivity : AppCompatActivity() {
         val enabled = am.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
             .any { it.id.startsWith(packageName) }
         if (!enabled) { Toast.makeText(this, "无障碍未授权，且 root 授权失败，请手动开启无障碍服务", Toast.LENGTH_LONG).show(); return }
-        val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-        startActivityForResult(mpm.createScreenCaptureIntent(), projectionRequest)
+        // 有 root 就走 root 截图，不弹"立即开始录制"授权框
+        probeRoot { ok ->
+            if (ok) {
+                HookService.startRoot(this)
+                findViewById<Button>(R.id.btnProjection).text = "结束监测"
+                findViewById<TextView>(R.id.tvStatus).text = "状态：监控中"
+                startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME))
+            } else {
+                val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+                startActivityForResult(mpm.createScreenCaptureIntent(), projectionRequest)
+            }
+        }
+    }
+
+    /** 探测一次 root（su -c id），结果缓存；回调一定在主线程 */
+    private fun probeRoot(onResult: (Boolean) -> Unit) {
+        if (rootProbeDone) {
+            onResult(rootAvailable)
+            return
+        }
+        Thread {
+            val ok = try {
+                val p = ProcessBuilder("su", "-c", "id").redirectErrorStream(true).start()
+                // su 弹窗没点的话会一直挂住，最多等 2.5 秒
+                val finished = p.waitFor(2500, java.util.concurrent.TimeUnit.MILLISECONDS)
+                val out = if (finished) p.inputStream.bufferedReader().readText() else ""
+                if (!finished) p.destroy()
+                out.contains("uid=0")
+            } catch (_: Exception) {
+                false
+            }
+            rootAvailable = ok
+            rootProbeDone = true
+            runOnUiThread { onResult(ok) }
+        }.apply { isDaemon = true }.start()
     }
 
     /** 用 root 直接写系统设置，自动开启无障碍服务和悬浮窗权限（云手机/已 root 设备适用） */
