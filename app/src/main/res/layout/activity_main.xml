@@ -69,6 +69,13 @@
         android:textSize="14sp"
         android:checked="true"
         android:text="执行买药+出售" />
+    <CheckBox
+        android:id="@+id/cbTestMode"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textSize="14sp"
+        android:checked="false"
+        android:text="测试模式（买药只到确认出售，跳过买药）" />
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"

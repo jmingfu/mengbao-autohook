@@ -1295,8 +1295,10 @@ private fun coord(name: String, def: FloatArray): FloatArray {
             logLine("金币当前=$it 已获得=${coinDelta()}")
         }
         logLine("买药：一键出售完成")
+        val testMode = prefs.getBoolean("testMode", false)
         var done = 0
-        for (i in listOf(1, 3)) {
+        if (testMode) logLine("测试模式：出售完成，跳过买药")
+        for (i in if (testMode) emptyList() else listOf(1, 3)) {
             val med = coordOrNull("med$i") ?: continue
             setStatus("买药：第 $i 种")
             tap(med); delay(2000)

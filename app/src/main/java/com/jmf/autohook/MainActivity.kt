@@ -51,6 +51,8 @@ class MainActivity : AppCompatActivity() {
         cbDecompose.isChecked = prefs.getBoolean("enableDecompose", true)
         val cbBuy = findViewById<android.widget.CheckBox>(R.id.cbBuy)
         cbBuy.isChecked = prefs.getBoolean("enableBuy", true)
+        val cbTestMode = findViewById<android.widget.CheckBox>(R.id.cbTestMode)
+        cbTestMode.isChecked = prefs.getBoolean("testMode", false)
 
         val btnProjection = findViewById<Button>(R.id.btnProjection)
         val tvStatus = findViewById<TextView>(R.id.tvStatus)
@@ -110,6 +112,7 @@ class MainActivity : AppCompatActivity() {
             saveIntervalDecomp(etIntervalDecomp)
             prefs.edit().putBoolean("enableDecompose", cbDecompose.isChecked).apply()
             prefs.edit().putBoolean("enableBuy", cbBuy.isChecked).apply()
+            prefs.edit().putBoolean("testMode", cbTestMode.isChecked).apply()
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
                 != PackageManager.PERMISSION_GRANTED) {
                 ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), notificationRequest)
