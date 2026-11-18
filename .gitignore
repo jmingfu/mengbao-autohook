@@ -10,4 +10,5 @@ local.properties
 *.keystore
 captures/
 xcapture.png
-.DS_Store.codex-shots/
+.DS_Store
+.codex-shots/
