@@ -143,45 +143,10 @@ private val laijiRow = floatArrayOf(0.6250f, 0.839f)
 private val laijiSwipeFrom = floatArrayOf(0.7000f, 0.80f)
 private val laijiSwipeTo = floatArrayOf(0.7000f, 0.25f)
 private val hookBtn = floatArrayOf(0.3775f, 0.0476f)
-
-// 校准项：key -> 界面上显示的名称
-private val coordKeys = listOf(
-    "mapNameBox" to "地图名",
-    "worldBtn" to "世界按钮",
-    "swipeFrom" to "大地图滑动起点",
-    "swipeTo" to "大地图滑动终点",
-    "__afk__" to "",
-    "laijiRow" to "来吉虾",
-    "laijiSwipeFrom" to "区域列表滑动起点",
-    "laijiSwipeTo" to "区域列表滑动终点",
-    "hookBtn" to "挂机按钮",
-    "regionCloseBtn" to "关闭叉（右上角）",
-    "improveEntry" to "改良图标（右下角）",
-    "nameCropTL" to "识别框左上角",
-    "nameCropBR" to "识别框右下角",
-    "avatar" to "头像",
-    "bag" to "包裹",
-    "shopBtn" to "商店按钮",
-    "sellAllBtn" to "一键出售",
-    "sellConfirm" to "出售确定",
-    "med1" to "红药50级",
-    "med3" to "蓝药50级",
-    "combatArrow" to "战斗页展开箭头",
-    "combatImprove" to "战斗菜单改良",
-    "improveRepairTab" to "改良-装备修理页签",
-    "improveDecomposeTab" to "改良-装备分解页签",
-    "improveRepairNow" to "改良-立即修理",
-    "improveFullRepair" to "改良-全身修理",
-    "improveDecomposeNow" to "改良-立即分解",
-    "improveCloseX" to "改良-关闭叉",
-    "improvePopupX" to "改良-弹框关闭叉",
-    "improvePopupConfirm" to "改良-弹框确认按钮",
-    "improveItem" to "改良-装备格",
-    "buyBtn" to "购买按钮",
-    "buyNumBox" to "购买数量框",
-    "buyNumConfirm" to "数量确认",
-    "shopClose" to "关闭商店",
-)
+// 喂宠物：右上角宠物头像、忠心旁的 + 号、以及"忠诚度已满"弹窗右上角绿叉
+private val petIcon = floatArrayOf(0.8367f, 0.0458f)
+private val petLoyaltyPlus = floatArrayOf(0.8102f, 0.6875f)
+private val petPopupX = floatArrayOf(0.6422f, 0.2542f)
 
 private val zeroCoord = floatArrayOf(0f, 0f)
 
@@ -344,6 +309,10 @@ enum class AfkProfile(val label: String, val key: String, val coords: Map<String
     FENQILING("分歧岭", "fenqiling", mapOf()),
     WANGCHENHU("忘尘湖", "wangchenhu", mapOf()),
     HELIUZHIDI("合流之地", "heliuzhidi", mapOf()),
+    KUANGFENG("狂风丘陵", "kuangfeng", mapOf(
+        "icon" to floatArrayOf(0.5250f, 0.3333f),
+        "teleport" to floatArrayOf(0.6195f, 0.4389f),
+    )),
 }
 
 private fun selectedAfkProfile(prefs: android.content.SharedPreferences): AfkProfile {
@@ -576,7 +545,6 @@ private fun coord(name: String, def: FloatArray): FloatArray {
     private var cachedPanel: android.widget.LinearLayout? = null
     private var cachedPanelLp: android.view.WindowManager.LayoutParams? = null
     private var panelDirty = true
-    private var panelScrollY = 0
 
     private fun overlayLp(w: Int, h: Int, gravity: Int): android.view.WindowManager.LayoutParams {
         val type = if (android.os.Build.VERSION.SDK_INT >= 26) {
@@ -684,8 +652,6 @@ private fun coord(name: String, def: FloatArray): FloatArray {
                     wm.addView(cached, cachedPanelLp)
                     panelView = cached
                     removeLogView()
-                    val sc = cached.findViewWithTag<android.widget.ScrollView>("panelScroll")
-                    sc?.postDelayed({ sc.scrollTo(0, panelScrollY) }, 60)
                     return@post
                 } catch (_: Exception) {
                     cachedPanel = null
@@ -747,18 +713,6 @@ private fun coord(name: String, def: FloatArray): FloatArray {
                 prefs.edit().putString("role", role).apply()
                 btnRole.text = "身份: $role"
             }
-            val btnClearCalib = smallButton("清除校准")
-            btnClearCalib.setOnClickListener {
-                if (btnClearCalib.text != "再点确认") {
-                    btnClearCalib.text = "再点确认"
-                    handler.postDelayed({ btnClearCalib.text = "清除校准" }, 3000)
-                    return@setOnClickListener
-                }
-                btnClearCalib.text = "清除校准"
-                prefs.all.keys.filter { it.startsWith("coord_") }.forEach { prefs.edit().remove(it).apply() }
-                panelDirty = true
-                android.widget.Toast.makeText(this, "已清除全部校准，恢复内置坐标", android.widget.Toast.LENGTH_SHORT).show()
-            }
             val btnHide = smallButton("隐藏")
             btnHide.setOnClickListener { togglePanel() }
             val head = android.widget.LinearLayout(this).apply {
@@ -767,7 +721,6 @@ private fun coord(name: String, def: FloatArray): FloatArray {
             }
             head.addView(btnStart)
             head.addView(btnRole)
-            head.addView(btnClearCalib)
             head.addView(btnHide)
             root.addView(head)
 
@@ -844,124 +797,14 @@ private fun coord(name: String, def: FloatArray): FloatArray {
             mapRow.addView(btnLog)
             root.addView(mapRow)
 
-            val scroll = android.widget.ScrollView(this)
-            scroll.setOnScrollChangeListener { _, _, sy, _, _ -> panelScrollY = sy }
-            val rows = android.widget.LinearLayout(this).apply {
-                orientation = android.widget.LinearLayout.VERTICAL
-            }
-            val afk = selectedAfkProfile(prefs)
-            val displayKeys = mutableListOf<Pair<String, String>>()
-            coordKeys.forEach { (k, l) ->
-                if (k == "__afk__") {
-                    displayKeys.add("icon" to "挂机图标(" + afk.label + ")")
-                    displayKeys.add("teleport" to "传送按钮(" + afk.label + ")")
-                } else {
-                    displayKeys.add(k to l)
-                }
-            }
             val panelW = (dm.widthPixels * 0.96f).toInt()
-            val panelH = (dm.heightPixels * 0.88f).toInt()
-            val cols = if (panelW / d >= 520f) 3 else 2
-            var rowView: android.widget.LinearLayout? = null
-            var building = true
-            displayKeys.forEachIndexed { index, pair ->
-                val key = pair.first
-                val label = pair.second
-                if (index % cols == 0) {
-                    rowView = android.widget.LinearLayout(this).apply {
-                        orientation = android.widget.LinearLayout.HORIZONTAL
-                    }
-                    rows.addView(rowView, android.widget.LinearLayout.LayoutParams(
-                        android.view.ViewGroup.LayoutParams.MATCH_PARENT,
-                        android.view.ViewGroup.LayoutParams.WRAP_CONTENT))
-                }
-                val cell = android.widget.LinearLayout(this).apply {
-                    orientation = android.widget.LinearLayout.VERTICAL
-                    setPadding((3 * d).toInt(), (2 * d).toInt(), (3 * d).toInt(), (2 * d).toInt())
-                    layoutParams = android.widget.LinearLayout.LayoutParams(0,
-                        android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-                }
-                rowView!!.addView(cell)
-                cell.addView(android.widget.TextView(this).apply {
-                    text = label
-                    textSize = 12f
-                    maxLines = 1
-                    ellipsize = android.text.TextUtils.TruncateAt.END
-                    setTextColor(0xFFCCCCCCL.toInt())
-                })
-                val line = android.widget.LinearLayout(this).apply {
-                    orientation = android.widget.LinearLayout.HORIZONTAL
-                    gravity = android.view.Gravity.CENTER_VERTICAL
-                }
-                cell.addView(line)
-                val edit = android.widget.EditText(this).apply {
-                    val saved = prefs.getString("coord_" + coordPrefix(key) + key, null) ?: prefs.getString("coord_$key", null)
-                    val def = coord(key, coordDefaults[key]!!)
-                    setText(saved ?: ("%.4f,%.4f".format(def[0], def[1])))
-                    textSize = 11f
-                    minWidth = 0
-                    minimumWidth = 0
-                    setPadding((2 * d).toInt(), 0, (2 * d).toInt(), 0)
-                    setTextColor(0xFFFFFFFFL.toInt())
-                    setHintTextColor(0xFF888888L.toInt())
-                    layoutParams = android.widget.LinearLayout.LayoutParams(0,
-                        android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-                    addTextChangedListener(object : android.text.TextWatcher {
-                        override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
-                        override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
-                        override fun afterTextChanged(s: android.text.Editable?) {
-                            if (building) return
-                            val parts = s?.toString()?.split(",")?.map { it.trim()?.toFloatOrNull() }
-                            if (parts != null && parts.size == 2 && parts[0] != null && parts[1] != null) {
-                                prefs.edit().putString("coord_" + coordPrefix(key) + key, "${parts[0]},${parts[1]}").apply()
-                            }
-                        }
-                    })
-                }
-                line.addView(edit)
-                val btnTest = smallButton("测试")
-                btnTest.layoutParams = android.widget.LinearLayout.LayoutParams(
-                    android.view.ViewGroup.LayoutParams.WRAP_CONTENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT)
-                btnTest.setOnClickListener {
-                    val parts = edit.text.toString().trim().split(",").mapNotNull { it.trim().toFloatOrNull() }
-                    if (parts.size != 2) {
-                        android.widget.Toast.makeText(this, "坐标格式应为 x,y", android.widget.Toast.LENGTH_SHORT).show()
-                        return@setOnClickListener
-                    }
-                    togglePanel()
-                    handler.postDelayed({
-                        testTap(floatArrayOf(parts[0], parts[1]))
-                        handler.postDelayed({ if (panelView == null) togglePanel() }, 1400)
-                    }, 400)
-                }
-                line.addView(btnTest)
-                val btnCalib = smallButton("校准")
-                btnCalib.layoutParams = android.widget.LinearLayout.LayoutParams(
-                    android.view.ViewGroup.LayoutParams.WRAP_CONTENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT)
-                btnCalib.setOnClickListener {
-                    togglePanel()
-                    captureNext(key, label)
-                }
-                line.addView(btnCalib)
-            }
-            if (displayKeys.isNotEmpty() && displayKeys.size % cols != 0) {
-                repeat(cols - displayKeys.size % cols) {
-                    rowView!!.addView(android.view.View(this), android.widget.LinearLayout.LayoutParams(0, 1, 1f))
-                }
-            }
-            building = false
-            scroll.addView(rows)
-            root.addView(scroll, android.widget.LinearLayout.LayoutParams(
-                android.view.ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
             removeLogView()
-            val lp = overlayLp(panelW, panelH, android.view.Gravity.CENTER)
+            val lp = overlayLp(panelW, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, android.view.Gravity.CENTER)
             wm.addView(root, lp)
             panelView = root
-            scroll.tag = "panelScroll"
             cachedPanel = root
             cachedPanelLp = lp
             panelDirty = false
-            scroll.postDelayed({ scroll.scrollTo(0, panelScrollY) }, 150)
         }
     }
     private fun todayKey(): String =
@@ -1468,9 +1311,47 @@ private fun coord(name: String, def: FloatArray): FloatArray {
         coordOrNull("shopClose")?.let { tap(it); delay(2000) }
         // 买完药可能还留着弹窗/商店残留，先统一关掉，避免后续战斗判定被挡住
         closeAllGreenX()
+        // 买完药之后、分解之前：喂宠物
+        feedPet()
         logLine("买药完成，成功=$done")
         prefs.edit().putLong("lastBuyAt", System.currentTimeMillis()).apply()
     }
+
+    /** 宠物"忠诚度已满"弹窗是否出现：绿叉是否落在弹窗右上角附近 */
+    private fun petPopupVisible(): Boolean {
+        val bmp = capture(true) ?: return false
+        val xs = try { findGreenXs(bmp) } catch (_: Exception) { emptyList() }
+        bmp.recycle()
+        val longSide = maxOf(inputW, inputH).toFloat().coerceAtLeast(1f)
+        val shortSide = minOf(inputW, inputH).toFloat().coerceAtLeast(1f)
+        val tx = petPopupX[0] * longSide
+        val ty = petPopupX[1] * shortSide
+        return xs.any { (x, y) ->
+            val (rx, ry) = capToReal(x, y)
+            kotlin.math.hypot((rx - tx).toDouble(), (ry - ty).toDouble()) < 80.0
+        }
+    }
+
+    /** 喂宠物：右上角宠物头像 → 反复点忠心旁 +，直到弹出"忠诚度100，不需喂食口粮" */
+    private suspend fun feedPet() {
+        if (!running) return
+        setStatus("喂宠物：打开宠物面板")
+        tap(petIcon); delay(2500)
+        var clicks = 0
+        while (running && clicks < 10) {
+            clicks++
+            tap(petLoyaltyPlus); delay(1200)
+            if (petPopupVisible()) {
+                logLine("喂宠物：第 $clicks 次点击后出现已满弹窗")
+                break
+            }
+        }
+        // 弹窗和宠物面板的关闭按钮都是绿叉，连点两轮可以一起收掉
+        closeAllGreenX()
+        setStatus("喂宠物：完成（点击 $clicks 次）")
+        delay(1000)
+    }
+
     private suspend fun runDailyChores(): Boolean {
         lastDailyStatus = "执行中"
         setStatus("开始日常：分解修理")
@@ -1679,7 +1560,11 @@ private fun coord(name: String, def: FloatArray): FloatArray {
         showRunningHint()
         running = true
         val prefs = getSharedPreferences("cfg", Context.MODE_PRIVATE)
-        val homeMaps = prefs.getString("homeMaps", "迪戈堡,自由之都")!!
+        // 主城只保留自由之都；老配置里仍是旧默认值时自动迁移
+        if (prefs.getString("homeMaps", null) == "迪戈堡,自由之都") {
+            prefs.edit().putString("homeMaps", "自由之都").apply()
+        }
+        val homeMaps = prefs.getString("homeMaps", "自由之都")!!
             .split("，", ",").map { it.trim() }.filter { it.isNotEmpty() }
         // 归位确认按当前选择的挂机地图名判断（旧 afkMap 配置项已废弃）
         val afkMap = selectedAfkProfile(prefs).label
@@ -2854,7 +2739,8 @@ private fun coord(name: String, def: FloatArray): FloatArray {
         tap(coord("worldBtn", worldBtn)); delay(3000)
         // 大地图滑动：仅幽暗森林/分歧岭/乱石岗/忘尘湖/合流之地取消，其余地图保留
         val noSwipe = selectedAfkProfile(getSharedPreferences("cfg", MODE_PRIVATE)) in
-            setOf(AfkProfile.YOUAN, AfkProfile.FENQILING, AfkProfile.LUANSHIGANG, AfkProfile.WANGCHENHU, AfkProfile.HELIUZHIDI)
+            setOf(AfkProfile.YOUAN, AfkProfile.FENQILING, AfkProfile.LUANSHIGANG,
+                AfkProfile.WANGCHENHU, AfkProfile.HELIUZHIDI, AfkProfile.KUANGFENG)
         if (!noSwipe) {
             swipe(coord("swipeFrom", swipeFrom), coord("swipeTo", swipeTo)); delay(3000)
         }
