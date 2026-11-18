@@ -148,6 +148,7 @@ private val hookBtn = floatArrayOf(0.3775f, 0.0476f)
 private val petIcon = floatArrayOf(0.8367f, 0.0458f)
 private val petLoyaltyPlus = floatArrayOf(0.8102f, 0.6875f)
 private val petPopupX = floatArrayOf(0.6422f, 0.2542f)
+private val petCloseX = floatArrayOf(0.8711f, 0.0444f)
 // 游戏币统计：商店底部"梦幻银币"整条的 OCR 区域（比例 l,t,r,b）
 private val coinCrop = floatArrayOf(0.3672f, 0.8750f, 0.7031f, 0.9653f)
 
@@ -1364,8 +1365,37 @@ private fun coord(name: String, def: FloatArray): FloatArray {
         }
         // 弹窗和宠物面板的关闭按钮都是绿叉，连点两轮可以一起收掉
         closeAllGreenX()
+        // 宠物面板的关闭叉在最上沿，绿叉扫描区（游戏区）可能扫不到，这里用固定坐标兜底
+        var guard = 0
+        while (running && guard < 2 && petPanelVisible()) {
+            guard++
+            logLine("喂宠物：面板未关，点关闭叉（第 $guard 次）")
+            tap(petCloseX); delay(1500)
+        }
         setStatus("喂宠物：完成（点击 $clicks 次）")
         delay(1000)
+    }
+
+    /** 宠物面板是否还开着：OCR 顶部标题栏是否识别到"宠物" */
+    private suspend fun petPanelVisible(): Boolean {
+        val bmp = capture(true) ?: return false
+        return try {
+            val l = (bmp.width * 0.42f).toInt().coerceIn(0, bmp.width - 8)
+            val r = (bmp.width * 0.58f).toInt().coerceIn(l + 8, bmp.width)
+            val t = 0
+            val b = (bmp.height * 0.09f).toInt().coerceIn(t + 8, bmp.height)
+            val crop = Bitmap.createBitmap(bmp, l, t, r - l, b - t)
+            val res = recognizer.process(InputImage.fromBitmap(crop, 0)).await()
+            crop.recycle()
+            val text = res.text.replace(" ", "").replace("\n", "")
+            val visible = text.contains("宠物")
+            logLine("宠物面板OCR: 文本=$text 仍打开=$visible")
+            visible
+        } catch (_: Exception) {
+            false
+        } finally {
+            bmp.recycle()
+        }
     }
 
     /** 读商店底部"梦幻银币"数字；识别失败返回 null，不覆盖已有值 */
