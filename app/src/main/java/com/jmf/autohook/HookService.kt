@@ -70,6 +70,7 @@ class HookService : AccessibilityService() {
         setStatus("监测已结束")
         hideRunningHint()
         releaseCapture()
+        showCoinDialog()
         refreshLogWindow()
         handler.postDelayed({ setLogTouchable(true) }, 400)
     }
@@ -147,6 +148,8 @@ private val hookBtn = floatArrayOf(0.3775f, 0.0476f)
 private val petIcon = floatArrayOf(0.8367f, 0.0458f)
 private val petLoyaltyPlus = floatArrayOf(0.8102f, 0.6875f)
 private val petPopupX = floatArrayOf(0.6422f, 0.2542f)
+// 游戏币统计：商店底部"梦幻银币"整条的 OCR 区域（比例 l,t,r,b）
+private val coinCrop = floatArrayOf(0.3672f, 0.8750f, 0.7031f, 0.9653f)
 
 private val zeroCoord = floatArrayOf(0f, 0f)
 
@@ -1275,8 +1278,21 @@ private fun coord(name: String, def: FloatArray): FloatArray {
         logLine("买药：包裹已打开")
         tap(shop); delay(2000)
         logLine("买药：商店已打开")
+        // 商店打开后读一次银币，作为本次监测的基准（只取第一次）
+        if (coinsBaseline == null) {
+            coinsBaseline = readCoins()
+            coinsLatest = coinsBaseline
+            logLine("金币基准=$coinsBaseline")
+            updateCoinHint()
+        }
         tap(sellAll); delay(2000)
         tap(sellOk); delay(2000)
+        // 每次确认出售后记录一次当前银币
+        readCoins()?.let {
+            coinsLatest = it
+            updateCoinHint()
+            logLine("金币当前=$it 已获得=${coinDelta()}")
+        }
         logLine("买药：一键出售完成")
         var done = 0
         for (i in listOf(1, 3)) {
@@ -1350,6 +1366,100 @@ private fun coord(name: String, def: FloatArray): FloatArray {
         closeAllGreenX()
         setStatus("喂宠物：完成（点击 $clicks 次）")
         delay(1000)
+    }
+
+    /** 读商店底部"梦幻银币"数字；识别失败返回 null，不覆盖已有值 */
+    private suspend fun readCoins(): Long? {
+        val bmp = capture(true) ?: return null
+        return try {
+            val l = (bmp.width * coinCrop[0]).toInt().coerceIn(0, bmp.width - 8)
+            val t = (bmp.height * coinCrop[1]).toInt().coerceIn(0, bmp.height - 8)
+            val r = (bmp.width * coinCrop[2]).toInt().coerceIn(l + 8, bmp.width)
+            val b = (bmp.height * coinCrop[3]).toInt().coerceIn(t + 8, bmp.height)
+            val crop = Bitmap.createBitmap(bmp, l, t, r - l, b - t)
+            val res = recognizer.process(InputImage.fromBitmap(crop, 0)).await()
+            crop.recycle()
+            val text = res.text.replace(" ", "").replace("\n", "")
+            val v = parseCoins(text)
+            logLine("金币OCR: 文本=$text 解析=$v")
+            v
+        } catch (e: Exception) {
+            logLine("金币OCR失败: ${e.message}")
+            null
+        } finally {
+            bmp.recycle()
+        }
+    }
+
+    /** 从 OCR 文本里取金额，支持"万/亿"后缀 */
+    private fun parseCoins(text: String): Long? {
+        val m = Regex("(\\d+(?:\\.\\d+)?)").find(text) ?: return null
+        val v = m.groupValues[1].toDoubleOrNull() ?: return null
+        return when {
+            text.contains("亿") -> (v * 100_000_000).toLong()
+            text.contains("万") -> (v * 10_000).toLong()
+            else -> v.toLong()
+        }
+    }
+
+    private fun coinDelta(): Long? {
+        val base = coinsBaseline ?: return null
+        val now = coinsLatest ?: return null
+        return now - base
+    }
+
+    /** 刷新左下角常驻提示里的"已获得游戏币" */
+    private fun updateCoinHint() {
+        val delta = coinDelta() ?: return
+        handler.post {
+            try { hintView?.text = "脚本进行中，请勿操作｜已获得游戏币 $delta" } catch (_: Exception) {}
+        }
+    }
+
+    /** 结束监测时弹出的游戏币统计框 */
+    private fun showCoinDialog() {
+        val delta = coinDelta() ?: return
+        handler.post {
+            try {
+                if (!android.provider.Settings.canDrawOverlays(this)) return@post
+                removeCoinDialog()
+                val wm = getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager
+                val d = resources.displayMetrics.density
+                val box = android.widget.LinearLayout(this).apply {
+                    orientation = android.widget.LinearLayout.VERTICAL
+                    setBackgroundColor(0xF0222222.toInt())
+                    setPadding((18 * d).toInt(), (16 * d).toInt(), (18 * d).toInt(), (10 * d).toInt())
+                }
+                box.addView(android.widget.TextView(this).apply {
+                    text = "本次已获得游戏币：$delta"
+                    textSize = 16f
+                    setTextColor(0xFFFFFFFF.toInt())
+                    setPadding(0, 0, 0, (10 * d).toInt())
+                })
+                val btn = android.widget.Button(this).apply { text = "确认" }
+                btn.setOnClickListener {
+                    removeCoinDialog()
+                    togglePanel()
+                }
+                box.addView(btn, android.widget.LinearLayout.LayoutParams(
+                    android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                    android.view.ViewGroup.LayoutParams.WRAP_CONTENT))
+                val lp = overlayLp((280 * d).toInt(),
+                    android.view.ViewGroup.LayoutParams.WRAP_CONTENT, android.view.Gravity.CENTER)
+                lp.flags = 0
+                wm.addView(box, lp)
+                coinDialog = box
+            } catch (_: Exception) {}
+        }
+    }
+
+    private fun removeCoinDialog() {
+        coinDialog?.let { v ->
+            try {
+                (getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager).removeView(v)
+            } catch (_: Exception) {}
+        }
+        coinDialog = null
     }
 
     private suspend fun runDailyChores(): Boolean {
@@ -1507,6 +1617,10 @@ private fun coord(name: String, def: FloatArray): FloatArray {
     }
 
     private var hintView: android.widget.TextView? = null
+    // 游戏币统计：本次监测的基准值 / 最新值
+    @Volatile private var coinsBaseline: Long? = null
+    @Volatile private var coinsLatest: Long? = null
+    private var coinDialog: android.view.View? = null
 
     private fun showRunningHint() {
         handler.post {
@@ -1552,6 +1666,8 @@ private fun coord(name: String, def: FloatArray): FloatArray {
     }
     private fun startMonitor() {
         if (running) return
+        coinsBaseline = null
+        coinsLatest = null
         if (!rootOk && imageReader == null) {
             logLine("录屏通道不存在，无法启动监测")
             return
@@ -1560,11 +1676,7 @@ private fun coord(name: String, def: FloatArray): FloatArray {
         showRunningHint()
         running = true
         val prefs = getSharedPreferences("cfg", Context.MODE_PRIVATE)
-        // 主城只保留自由之都；老配置里仍是旧默认值时自动迁移
-        if (prefs.getString("homeMaps", null) == "迪戈堡,自由之都") {
-            prefs.edit().putString("homeMaps", "自由之都").apply()
-        }
-        val homeMaps = prefs.getString("homeMaps", "自由之都")!!
+        val homeMaps = prefs.getString("homeMaps", "迪戈堡,自由之都")!!
             .split("，", ",").map { it.trim() }.filter { it.isNotEmpty() }
         // 归位确认按当前选择的挂机地图名判断（旧 afkMap 配置项已废弃）
         val afkMap = selectedAfkProfile(prefs).label
@@ -3145,6 +3257,7 @@ private fun coord(name: String, def: FloatArray): FloatArray {
         logView = null
         projection?.stop()
         RootShell.close()
+        removeCoinDialog()
         lastFrame?.recycle()
         lastFrame = null
         imageReader?.close()
