@@ -1450,7 +1450,12 @@ private fun coord(name: String, def: FloatArray): FloatArray {
 
     /** 结束监测时弹出的游戏币统计框 */
     private fun showCoinDialog() {
-        val delta = coinDelta() ?: return
+        if (monitorStartAt <= 0L) return
+        val cost = ((System.currentTimeMillis() - monitorStartAt) / 1000).coerceAtLeast(0)
+        val mm = cost / 60
+        val ss = cost % 60
+        val delta = coinDelta()
+        val coinLine = if (delta != null) "本次已获得游戏币：$delta" else "本次已获得游戏币：未统计"
         handler.post {
             try {
                 if (!android.provider.Settings.canDrawOverlays(this)) return@post
@@ -1463,7 +1468,7 @@ private fun coord(name: String, def: FloatArray): FloatArray {
                     setPadding((18 * d).toInt(), (16 * d).toInt(), (18 * d).toInt(), (10 * d).toInt())
                 }
                 box.addView(android.widget.TextView(this).apply {
-                    text = "本次已获得游戏币：$delta"
+                    text = "$coinLine\n用时：${mm}分${ss}秒"
                     textSize = 16f
                     setTextColor(0xFFFFFFFF.toInt())
                     setPadding(0, 0, 0, (10 * d).toInt())
@@ -1652,6 +1657,7 @@ private fun coord(name: String, def: FloatArray): FloatArray {
     // 游戏币统计：本次监测的基准值 / 最新值
     @Volatile private var coinsBaseline: Long? = null
     @Volatile private var coinsLatest: Long? = null
+    @Volatile private var monitorStartAt: Long = 0L
     private var coinDialog: android.view.View? = null
 
     private fun showRunningHint() {
@@ -1700,6 +1706,7 @@ private fun coord(name: String, def: FloatArray): FloatArray {
         if (running) return
         coinsBaseline = null
         coinsLatest = null
+        monitorStartAt = System.currentTimeMillis()
         if (!rootOk && imageReader == null) {
             logLine("录屏通道不存在，无法启动监测")
             return
