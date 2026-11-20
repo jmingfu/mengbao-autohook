@@ -58,6 +58,9 @@ class HookService : AccessibilityService() {
             instance?.teardown()
         }
 
+        /** 无障碍服务是否真的已经连上（设置项里有名字不代表已连接） */
+        fun isServiceConnected(): Boolean = instance != null
+
         fun afkProfiles(): List<AfkProfile> = AfkProfile.values().toList()
     }
 
@@ -1538,16 +1541,43 @@ private fun coord(name: String, def: FloatArray): FloatArray {
         return cleaned
     }
 
-    /** 队长脱战监测：独立流程，分解改良结束后执行；不在战斗才点挂机按钮 */
+    /**
+     * 队长脱战监测：独立流程，分解改良结束后执行。
+     * 第一阶段：15 秒内每 2 秒查一次特技，查到任意一次 = 正在战斗，跳过；
+     * 15 秒一次都没查到 = 确认脱战。
+     * 第二阶段：点挂机恢复，15 秒内每 2 秒查特技校验；没出现就重试点击，最多 10 轮。
+     */
     private suspend fun captainLeaveCombatCheck(stage: String) {
         if (!running || role != "队长") return
         closeAllGreenX()
-        if (!isCombatPage()) {
-            logLine("$stage 脱战监测：已脱战，点挂机按钮")
-            tap(coord("hookBtn", hookBtn)); delay(3000)
-        } else {
-            logLine("$stage 脱战监测：仍在战斗，跳过点击")
+        var combat = false
+        val t0 = System.currentTimeMillis()
+        while (running && System.currentTimeMillis() - t0 < 15000) {
+            delay(2000)
+            if (isCombatPage()) {
+                combat = true
+                break
+            }
         }
+        if (combat) {
+            logLine("$stage 脱战监测：15 秒内检测到特技，正在战斗，跳过")
+            return
+        }
+        var attempt = 0
+        while (running && attempt < 10) {
+            attempt++
+            tap(coord("hookBtn", hookBtn))
+            val v0 = System.currentTimeMillis()
+            while (running && System.currentTimeMillis() - v0 < 15000) {
+                delay(2000)
+                if (isCombatPage()) {
+                    logLine("$stage 脱战监测：特技已出现，挂机恢复成功（第 $attempt 次）")
+                    return
+                }
+            }
+            logLine("$stage 脱战监测：15 秒内特技未出现，重试（第 $attempt 次）")
+        }
+        logLine("$stage 脱战监测：10 轮重试全部失败，放弃本轮")
     }
     private var calibView: android.view.View? = null
     @Volatile private var lastDailyStatus = "未执行"
@@ -1704,6 +1734,11 @@ private fun coord(name: String, def: FloatArray): FloatArray {
     }
     private fun startMonitor() {
         if (running) return
+        if (instance == null) {
+            logLine("无障碍服务未连接，无法点击，已取消启动")
+            android.widget.Toast.makeText(this, "无障碍服务未连接，请重新点开始监测", android.widget.Toast.LENGTH_LONG).show()
+            return
+        }
         coinsBaseline = null
         coinsLatest = null
         monitorStartAt = System.currentTimeMillis()

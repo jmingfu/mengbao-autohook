@@ -169,41 +169,65 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun askProjection() {
-        if (Settings.canDrawOverlays(this) && isAccessibilityEnabledNow()) {
-            afterPermissionsReady()
-            return
-        }
+        // 无障碍重启后会丢失（root 是持久的），所以每次都重新用 root 拉起一遍
         Toast.makeText(this, "正在通过 root 开启无障碍/悬浮窗…", Toast.LENGTH_SHORT).show()
         Thread {
             val rootOk = RootShell.ensure()
+            val me = "$packageName/$packageName.HookService"
             if (rootOk) {
                 RootShell.exec("appops set $packageName SYSTEM_ALERT_WINDOW allow")
-                val me = "$packageName/$packageName.HookService"
-                val cur = RootShell.exec("settings get secure enabled_accessibility_services")?.trim().orEmpty()
-                val list = if (cur.isEmpty() || cur == "null") mutableListOf<String>() else cur.split(":").toMutableList()
-                if (!list.contains(me)) list.add(me)
-                RootShell.exec("settings put secure enabled_accessibility_services '${list.joinToString(":")}'")
-                RootShell.exec("settings put secure accessibility_enabled 1")
+                enableAccessibilityByRoot(me)
             }
-            // 系统绑定无障碍服务需要几秒，最多等 15 秒
-            val deadline = System.currentTimeMillis() + 15_000
-            while (rootOk && System.currentTimeMillis() < deadline && !isAccessibilityEnabledNow()) {
+            // 等"服务真正连上"，而不是等设置项；最多 15 秒
+            val startAt = System.currentTimeMillis()
+            val deadline = startAt + 15_000
+            var rebindTried = false
+            while (rootOk && System.currentTimeMillis() < deadline) {
+                if (HookService.isServiceConnected()) break
+                // 写入 3 秒还没连上，强制重绑一次（值没变化系统不会重新绑定）
+                if (!rebindTried && System.currentTimeMillis() - startAt > 3_000) {
+                    rebindTried = true
+                    forceRebindAccessibility(me)
+                }
                 Thread.sleep(500)
             }
+            val connected = HookService.isServiceConnected()
             runOnUiThread {
                 if (!Settings.canDrawOverlays(this)) {
                     Toast.makeText(this, "悬浮窗未授权，请手动授予「显示在其他应用上层」权限", Toast.LENGTH_LONG).show()
                     startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, android.net.Uri.parse("package:$packageName")))
                     return@runOnUiThread
                 }
-                if (!isAccessibilityEnabledNow()) {
-                    Toast.makeText(this, "无障碍未授权，请手动开启无障碍服务", Toast.LENGTH_LONG).show()
+                if (!connected) {
+                    Toast.makeText(this, "无障碍服务未连接，请手动开启无障碍服务", Toast.LENGTH_LONG).show()
                     startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
                     return@runOnUiThread
                 }
                 afterPermissionsReady()
             }
         }.apply { isDaemon = true }.start()
+    }
+
+    /** 用 root 把无障碍服务写进系统设置（追加，不覆盖其他应用） */
+    private fun enableAccessibilityByRoot(me: String) {
+        val cur = RootShell.exec("settings get secure enabled_accessibility_services")?.trim().orEmpty()
+        val list = if (cur.isEmpty() || cur == "null") mutableListOf<String>() else cur.split(":").toMutableList()
+        if (!list.contains(me)) list.add(me)
+        RootShell.exec("settings put secure enabled_accessibility_services '${list.joinToString(":")}'")
+        RootShell.exec("settings put secure accessibility_enabled 1")
+    }
+
+    /** 值没变化系统不会重新绑定：先摘掉自己的服务写回，再加回去写一次，强制重绑 */
+    private fun forceRebindAccessibility(me: String) {
+        val cur = RootShell.exec("settings get secure enabled_accessibility_services")?.trim().orEmpty()
+        if (cur.isEmpty() || cur == "null") return
+        val without = cur.split(":").filter { it.isNotBlank() && it != me }
+        RootShell.exec("settings put secure enabled_accessibility_services '${without.joinToString(":")}'")
+        Thread.sleep(800)
+        val list = without.toMutableList()
+        if (!list.contains(me)) list.add(me)
+        RootShell.exec("settings put secure enabled_accessibility_services '${list.joinToString(":")}'")
+        RootShell.exec("settings put secure accessibility_enabled 1")
     }
 
     /** 无障碍是否已启用：系统列表里有，或设置项里已写入（服务尚未绑定时也能认） */
