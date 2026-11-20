@@ -24,7 +24,7 @@ android {
         minSdk 24
         targetSdk 34
         versionCode 1
-        versionName '1.0.0j'
+        versionName '1.0.0k'
     }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
