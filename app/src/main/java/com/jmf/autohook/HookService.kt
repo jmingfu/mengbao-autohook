@@ -1282,20 +1282,20 @@ private fun coord(name: String, def: FloatArray): FloatArray {
         logLine("买药：包裹已打开")
         tap(shop); delay(2000)
         logLine("买药：商店已打开")
-        // 商店打开后读一次银币，作为本次监测的基准（只取第一次）
-        if (coinsBaseline == null) {
-            coinsBaseline = readCoins()
-            coinsLatest = coinsBaseline
-            logLine("金币基准=$coinsBaseline")
-            updateCoinHint()
-        }
         tap(sellAll); delay(2000)
         tap(sellOk); delay(2000)
-        // 每次确认出售后记录一次当前银币
+        // 出售完毕后读银币：第一次作为基准（排除背包初始物品的收益），之后每次更新最新值
         readCoins()?.let {
-            coinsLatest = it
+            if (coinsBaseline == null) {
+                coinsBaseline = it
+                coinsLatest = it
+                logLine("金币基准=$it（首次出售后，排除初始物品）")
+            } else if (it != coinsLatest) {
+                coinsLatest = it
+                coinsLastChangeAt = System.currentTimeMillis()
+                logLine("金币当前=$it 已获得=${coinDelta()}")
+            }
             updateCoinHint()
-            logLine("金币当前=$it 已获得=${coinDelta()}")
         }
         logLine("买药：一键出售完成")
         val testMode = prefs.getBoolean("testMode", false)
@@ -1446,8 +1446,10 @@ private fun coord(name: String, def: FloatArray): FloatArray {
     /** 刷新左下角常驻提示里的"已获得游戏币" */
     private fun updateCoinHint() {
         val delta = coinDelta() ?: return
+        val minutes = if (coinsLastChangeAt > 0L && monitorStartAt > 0L)
+            ((coinsLastChangeAt - monitorStartAt) / 60000L).coerceAtLeast(0) else 0L
         handler.post {
-            try { hintView?.text = "脚本进行中，请勿操作｜已获得游戏币 $delta" } catch (_: Exception) {}
+            try { hintView?.text = "脚本进行中，请勿操作｜已获得游戏币 $delta，统计时间 $minutes 分钟" } catch (_: Exception) {}
         }
     }
 
@@ -1687,6 +1689,7 @@ private fun coord(name: String, def: FloatArray): FloatArray {
     // 游戏币统计：本次监测的基准值 / 最新值
     @Volatile private var coinsBaseline: Long? = null
     @Volatile private var coinsLatest: Long? = null
+    @Volatile private var coinsLastChangeAt: Long = 0L
     @Volatile private var monitorStartAt: Long = 0L
     private var coinDialog: android.view.View? = null
 
@@ -1741,6 +1744,7 @@ private fun coord(name: String, def: FloatArray): FloatArray {
         }
         coinsBaseline = null
         coinsLatest = null
+        coinsLastChangeAt = 0L
         monitorStartAt = System.currentTimeMillis()
         if (!rootOk && imageReader == null) {
             logLine("录屏通道不存在，无法启动监测")
