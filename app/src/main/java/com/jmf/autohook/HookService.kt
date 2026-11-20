@@ -481,6 +481,12 @@ private fun coord(name: String, def: FloatArray): FloatArray {
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
+        // 运行时再把事件订阅清到最小：本服务只用手势与节点，不需要事件流（降低常驻 CPU）
+        try {
+            val info = serviceInfo
+            info.eventTypes = android.view.accessibility.AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+            serviceInfo = info
+        } catch (_: Exception) {}
         logLine("无障碍服务已连接")
     }
 
